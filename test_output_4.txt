@@ -1,0 +1,69 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0 -- /Library/Developer/CommandLineTools/usr/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/princetinna/Documents/quant_dashboard2
+plugins: mock-3.15.1
+collecting ... collected 1 item
+
+tests/test_ui.py::test_ui_insufficient_data_warning FAILED               [100%]
+
+=================================== FAILURES ===================================
+______________________ test_ui_insufficient_data_warning _______________________
+
+    def test_ui_insufficient_data_warning():
+        """
+        Integration test using Streamlit AppTest to verify that the UI
+        correctly identifies and warns the user when the selected
+        rolling window (e.g., 252 days) exceeds the available
+        historical data for an asset.
+        """
+        at = AppTest.from_file("ui/app.py", default_timeout=60)
+    
+        # Setup: Mock the data pipeline to return only 10 days of history
+        mock_data = pd.DataFrame(
+            np.random.randn(10, 1),
+            columns=["^NSEI"],
+            index=pd.date_range("2024-01-01", periods=10)
+        )
+    
+        # Mock the universe to match our mock data
+        mock_universe = {"^NSEI": {"name": "Nifty 50", "class": "Equity", "type": "PR", "inception": "2024-01-01"}}
+    
+        with patch("data.pipeline.DataPipeline") as MockPipeline, \
+             patch("ui.app.load_universe", return_value=mock_universe):
+    
+            # Setup mock pipeline instance
+            mock_pipeline_inst = MockPipeline.return_value
+            mock_pipeline_inst.build_primary_matrix.return_value = mock_data
+    
+            at.run()
+    
+            # Select '1Y (252d)' which is greater than our 10-day mock
+>           at.radio[0].set_value("1Y (252d)").run()
+
+tests/test_ui.py:36: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = WidgetList(), idx = 0
+
+    def __getitem__(self, idx: int | slice) -> El_co | ElementList[El_co]:
+        if isinstance(idx, slice):
+            return ElementList(self._list[idx])
+>       return self._list[idx]
+E       IndexError: list index out of range
+
+../../Library/Python/3.9/lib/python/site-packages/streamlit/testing/v1/element_tree.py:226: IndexError
+----------------------------- Captured stderr call -----------------------------
+2026-05-16 09:11:30.964 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-05-16 09:11:32.292 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-05-16 09:11:32.292 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-05-16 09:11:32.294 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+=============================== warnings summary ===============================
+tests/test_ui.py::test_ui_insufficient_data_warning
+  /Users/princetinna/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_ui.py::test_ui_insufficient_data_warning - IndexError: list...
+========================= 1 failed, 1 warning in 2.02s =========================

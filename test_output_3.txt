@@ -1,0 +1,119 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0 -- /Library/Developer/CommandLineTools/usr/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/princetinna/Documents/quant_dashboard2
+plugins: mock-3.15.1
+collecting ... collected 1 item
+
+tests/test_ui.py::test_ui_insufficient_data_warning FAILED               [100%]
+
+=================================== FAILURES ===================================
+______________________ test_ui_insufficient_data_warning _______________________
+
+    def test_ui_insufficient_data_warning():
+        """
+        Integration test using Streamlit AppTest to verify that the UI
+        correctly identifies and warns the user when the selected
+        rolling window (e.g., 252 days) exceeds the available
+        historical data for an asset.
+        """
+        at = AppTest.from_file("ui/app.py")
+    
+        # Setup: Mock the data pipeline to return only 10 days of history
+        mock_data = pd.DataFrame(
+            np.random.randn(10, 1),
+            columns=["^NSEI"],
+            index=pd.date_range("2024-01-01", periods=10)
+        )
+    
+        # Mock the universe to match our mock data
+        mock_universe = {"^NSEI": {"name": "Nifty 50", "class": "Equity", "type": "PR", "inception": "2024-01-01"}}
+    
+        with patch("ui.app.DataPipeline") as MockPipeline, \
+             patch("ui.app.load_universe", return_value=mock_universe):
+    
+            # Setup mock pipeline instance
+            mock_pipeline_inst = MockPipeline.return_value
+            mock_pipeline_inst.build_primary_matrix.return_value = mock_data
+    
+>           at.run()
+
+tests/test_ui.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../Library/Python/3.9/lib/python/site-packages/streamlit/testing/v1/app_test.py:396: in run
+    return self._tree.run(timeout=timeout)
+../../Library/Python/3.9/lib/python/site-packages/streamlit/testing/v1/element_tree.py:1910: in run
+    return self._runner._run(widget_states, timeout=timeout)
+../../Library/Python/3.9/lib/python/site-packages/streamlit/testing/v1/app_test.py:359: in _run
+    self._tree = script_runner.run(
+../../Library/Python/3.9/lib/python/site-packages/streamlit/testing/v1/local_script_runner.py:128: in run
+    require_widgets_deltas(self, timeout)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+runner = LocalScriptRunner(forward_msg_queue=<streamlit.runtime.forward_msg_queue.ForwardMsgQueue object at 0x3049edc40>, scrip...in"
+  timezone: "(\'IST\', \'IST\')"
+}
+}, {}, {'client_state': page_script_hash: "ef9e5d05c16f17cc907a64d79893303c"
+}])
+timeout = 3
+
+    def require_widgets_deltas(runner: LocalScriptRunner, timeout: float = 3) -> None:
+        """Wait for the given ScriptRunner to emit a completion event. If the timeout
+        is reached, the runner will be shutdown and an error will be thrown.
+        """
+    
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            time.sleep(0.001)
+            if runner.script_stopped():
+                return
+    
+        # If we get here, the runner hasn't yet completed before our
+        # timeout. Create an error string for debugging.
+        err_string = f"AppTest script run timed out after {timeout}(s)"
+    
+        # Shutdown the runner before throwing an error, so that the script
+        # doesn't hang forever.
+        runner.request_stop()
+        runner.join()
+    
+>       raise RuntimeError(err_string)
+E       RuntimeError: AppTest script run timed out after 3(s)
+
+../../Library/Python/3.9/lib/python/site-packages/streamlit/testing/v1/local_script_runner.py:176: RuntimeError
+----------------------------- Captured stderr call -----------------------------
+2026-05-16 09:10:47.310 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-05-16 09:10:48.430 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-05-16 09:10:48.430 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-05-16 09:10:48.432 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+------------------------------ Captured log call -------------------------------
+WARNING  data.pipeline:pipeline.py:134 🛡️ Spike Guard: Masked 2 anomalies for NIFTYBEES.NS
+WARNING  data.pipeline:pipeline.py:134 🛡️ Spike Guard: Masked 2 anomalies for BANKBEES.NS
+WARNING  data.pipeline:pipeline.py:134 🛡️ Spike Guard: Masked 2 anomalies for GOLDBEES.NS
+WARNING  data.pipeline:pipeline.py:134 🛡️ Spike Guard: Masked 156 anomalies for SETFGOLD.NS
+WARNING  data.pipeline:pipeline.py:134 🛡️ Spike Guard: Masked 1 anomalies for SILVERBEES.NS
+=============================== warnings summary ===============================
+tests/test_ui.py::test_ui_insufficient_data_warning
+  /Users/princetinna/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+    warnings.warn(
+
+tests/test_ui.py::test_ui_insufficient_data_warning
+  /Users/princetinna/Library/Python/3.9/lib/python/site-packages/vectorbt/returns/accessors.py:902: UserWarning: Changing the frequency will create a copy of this object. Consider setting it upon object creation to re-use existing cache.
+    reself = Wrapping.resolve_self(
+
+tests/test_ui.py::test_ui_insufficient_data_warning
+  /Users/princetinna/Library/Python/3.9/lib/python/site-packages/vectorbt/generic/stats_builder.py:396: UserWarning: Metric 'benchmark_return' requires benchmark_rets to be set
+    warnings.warn(warning_message)
+
+tests/test_ui.py::test_ui_insufficient_data_warning
+  /Users/princetinna/Library/Python/3.9/lib/python/site-packages/vectorbt/generic/stats_builder.py:396: UserWarning: Metric 'alpha' requires benchmark_rets to be set
+    warnings.warn(warning_message)
+
+tests/test_ui.py::test_ui_insufficient_data_warning
+  /Users/princetinna/Library/Python/3.9/lib/python/site-packages/vectorbt/generic/stats_builder.py:396: UserWarning: Metric 'beta' requires benchmark_rets to be set
+    warnings.warn(warning_message)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_ui.py::test_ui_insufficient_data_warning - RuntimeError: Ap...
+======================== 1 failed, 5 warnings in 4.59s =========================

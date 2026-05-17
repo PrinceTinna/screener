@@ -1,0 +1,10 @@
+vectorbt>=0.28.2
+numba>=0.56.4
+streamlit>=1.31.0
+plotly>=6.7.0
+yfinance>=0.2.36
+pandas>=2.0.0
+pyarrow>=15.0.0
+pytest>=8.0.0
+holidays>=0.42
+pandas_market_calendars>=4.3.3

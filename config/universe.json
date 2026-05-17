@@ -1,0 +1,158 @@
+{
+  "^NSEI": {
+    "name": "NIFTY 50 Index",
+    "class": "Broad Market - Benchmark",
+    "type": "PR",
+    "inception": "1996-04-22"
+  },
+  "NIFTYBEES.NS": {
+    "name": "Nippon India ETF Nifty 50 BeES",
+    "class": "Broad Market - Equity",
+    "type": "TR",
+    "inception": "2001-12-28"
+  },
+  "^BSESN": {
+    "name": "S&P BSE SENSEX Index",
+    "class": "Broad Market - Benchmark",
+    "type": "PR",
+    "inception": "1986-01-01"
+  },
+  "JUNIORBEES.NS": {
+    "name": "Nippon India ETF Nifty Next 50 Junior BeES",
+    "class": "Broad Market - Equity",
+    "type": "TR",
+    "inception": "2003-02-21"
+  },
+  "MID150BEES.NS": {
+    "name": "Nippon India ETF Nifty Midcap 150",
+    "class": "Broad Market - Midcap",
+    "type": "TR",
+    "inception": "2019-01-31"
+  },
+  "HDFCSML250.NS": {
+    "name": "HDFC Nifty Smallcap 250 ETF",
+    "class": "Broad Market - Smallcap",
+    "type": "TR",
+    "inception": "2023-02-15"
+  },
+  "^NSEBANK": {
+    "name": "NIFTY Bank Index",
+    "class": "Sectoral - Benchmark",
+    "type": "PR",
+    "inception": "2000-01-01"
+  },
+  "BANKBEES.NS": {
+    "name": "Nippon India ETF Nifty Bank BeES",
+    "class": "Sectoral - Finance",
+    "type": "TR",
+    "inception": "2004-05-26"
+  },
+  "BANKNIFTY1.NS": {
+    "name": "Kotak Nifty Bank ETF",
+    "class": "Sectoral - Finance",
+    "type": "TR",
+    "inception": "2014-12-04"
+  },
+  "^CNXIT": {
+    "name": "NIFTY IT Index",
+    "class": "Sectoral - Benchmark",
+    "type": "PR",
+    "inception": "1996-01-01"
+  },
+  "ITBEES.NS": {
+    "name": "Nippon India ETF Nifty IT BeES",
+    "class": "Sectoral - IT",
+    "type": "TR",
+    "inception": "2020-06-26"
+  },
+  "^CNXPHARMA": {
+    "name": "NIFTY Pharma Index",
+    "class": "Sectoral - Benchmark",
+    "type": "PR",
+    "inception": "2004-01-01"
+  },
+  "PHARMABEES.NS": {
+    "name": "Nippon India Nifty Pharma ETF",
+    "class": "Sectoral - Pharma",
+    "type": "TR",
+    "inception": "2021-07-02"
+  },
+  "^CNXFMCG": {
+    "name": "NIFTY FMCG Index",
+    "class": "Sectoral - Benchmark",
+    "type": "PR",
+    "inception": "2004-01-01"
+  },
+  "^CNXAUTO": {
+    "name": "NIFTY Auto Index",
+    "class": "Sectoral - Benchmark",
+    "type": "PR",
+    "inception": "2004-01-01"
+  },
+  "AUTOBEES.NS": {
+    "name": "Nippon India Nifty Auto ETF",
+    "class": "Sectoral - Auto",
+    "type": "TR",
+    "inception": "2022-01-19"
+  },
+  "MOM100.NS": {
+    "name": "Motilal Oswal Nifty 200 Momentum 30 ETF",
+    "class": "Smart Beta - Momentum",
+    "type": "TR",
+    "inception": "2022-02-10"
+  },
+  "GOLDBEES.NS": {
+    "name": "Nippon India ETF Gold BeES",
+    "class": "Commodities - Gold",
+    "type": "TR",
+    "inception": "2007-03-08"
+  },
+  "SETFGOLD.NS": {
+    "name": "SBI ETF Gold",
+    "class": "Commodities - Gold",
+    "type": "TR",
+    "inception": "2010-05-24"
+  },
+  "SILVERBEES.NS": {
+    "name": "Nippon India Silver ETF",
+    "class": "Commodities - Silver",
+    "type": "TR",
+    "inception": "2022-02-02"
+  },
+  "LIQUIDBEES.NS": {
+    "name": "Nippon India ETF Nifty 1D Rate Liquid BeES",
+    "class": "Fixed Income - Cash",
+    "type": "TR",
+    "inception": "2003-07-08"
+  },
+  "CPSEETF.NS": {
+    "name": "Nippon India CPSE ETF",
+    "class": "Thematic - PSU",
+    "type": "TR",
+    "inception": "2014-03-28"
+  },
+  "PSUBNKBEES.NS": {
+    "name": "Nippon India ETF Nifty PSU Bank BeES",
+    "class": "Sectoral - PSU Bank",
+    "type": "TR",
+    "inception": "2007-10-25"
+  },
+  "INFRABEES.NS": {
+    "name": "Nippon India ETF Nifty Infrastructure BeES",
+    "class": "Thematic - Infrastructure",
+    "type": "TR",
+    "inception": "2010-09-29"
+  },
+  "SETFNIF50.NS": {
+    "name": "SBI ETF Nifty 50",
+    "class": "Broad Market - Equity",
+    "type": "TR",
+    "inception": "2015-07-23"
+  },
+  "^CNXPSE": {
+    "name": "NIFTY PSE Index",
+    "class": "Thematic - Benchmark",
+    "type": "PR",
+    "inception": "2004-01-01"
+  }
+}

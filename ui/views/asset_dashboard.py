@@ -1,0 +1,216 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+
+from ui.components import (
+    render_kpi_dashboard, 
+    render_timeseries_chart, 
+    render_distribution_matrix,
+    render_methodology_drilldown
+)
+from config.settings import TRADING_DAYS_PER_YEAR
+from core.state_math import classify_regime_2d
+
+@st.cache_data
+def _cached_vbt_stats(_daily_returns):
+    """Cache VBT stats per ticker — independent of rolling window selection."""
+    return _daily_returns.vbt.returns.stats(settings=dict(freq='D'))
+
+def render(master_matrix: pd.DataFrame, universe: dict, primary_ticker: str, benchmarks: list, 
+           math_engine, window_days: int, window_label: str, lookback_range: tuple,
+           rolling_returns: pd.DataFrame = None):
+    """
+    Renders Tab 1: Asset Dashboard (Pure Analysis Layer).
+    """
+    st.markdown("## 📊 Asset Dashboard")
+    st.markdown("Strict historical profiling of returns and volatility.")
+    
+    # Use pre-computed rolling returns if provided, else calculate locally
+    if rolling_returns is not None:
+        full_rolling_returns = rolling_returns
+    else:
+        with st.spinner("Calculating Rolling Returns Matrix…"):
+            full_rolling_returns = math_engine.calculate_rolling_returns(window_days)
+    
+    # Slice results for display based on Historical Lookback
+    start_lookback, end_lookback = lookback_range
+    rolling_returns = full_rolling_returns.loc[start_lookback:end_lookback]
+    sliced_master_matrix = master_matrix.loc[start_lookback:end_lookback]
+
+    # Slice to primary asset
+    primary_returns = rolling_returns[primary_ticker].dropna()
+
+    if primary_returns.empty:
+        st.warning(
+            f"⚠️ **Insufficient Data:** Cannot calculate {window_label} rolling returns for "
+            f"**{universe[primary_ticker]['name']}**. "
+            f"The asset may have too short a history for this window. "
+            f"Try a shorter window or check the Help tab."
+        )
+        return
+
+    cagr_matrix = math_engine.calculate_cagr(rolling_returns, window_days)
+    percentiles = math_engine.get_cross_sectional_percentiles(rolling_returns)
+
+    # Current KPIs
+    current_ret = primary_returns.iloc[-1]
+    current_cagr = cagr_matrix[primary_ticker].dropna().iloc[-1]
+    win_rate = (primary_returns > 0).mean()
+    
+    # Historical expectation metrics
+    avg_ret = primary_returns.mean()
+    p50_ret = primary_returns.median()
+    p30_ret = np.percentile(primary_returns, 30)
+    
+    # New Metrics: Mean Annualized CAGR and Worst Return (P0)
+    years = window_days / TRADING_DAYS_PER_YEAR
+    mean_cagr = (1 + avg_ret) ** (1 / years) - 1
+    worst_ret = primary_returns.min()
+
+    # New Metric: Max Drawdown (Slices series based on lookback)
+    p_prices = sliced_master_matrix[primary_ticker].dropna()
+    p_cummax = p_prices.cummax()
+    p_drawdown = (p_prices - p_cummax) / p_cummax
+    max_dd = p_drawdown.min()
+
+    # Universe rank
+    current_row = rolling_returns.iloc[-1].dropna()
+    rank_pos = (current_row > current_ret).sum() + 1
+    rank_str = f"#{rank_pos} of {len(current_row)}"
+
+    # Metadata header
+    meta = universe[primary_ticker]
+    asset_class_badge = f"`{meta.get('class', 'Unknown')}`"
+    asset_type_label = "Total Return (ETF)" if meta.get('type') == 'TR' else "Price Return (Index)"
+    st.markdown(
+        f"**{primary_ticker}** &nbsp;|&nbsp; {meta['name']} &nbsp;|&nbsp; "
+        f"{asset_class_badge} &nbsp;|&nbsp; {asset_type_label} &nbsp;|&nbsp; "
+        f"Inception: `{meta.get('inception', 'Unknown')}`",
+        unsafe_allow_html=True
+    )
+
+    # TR/PR mismatch warning
+    primary_type = meta.get('type')
+    if any(universe[b].get('type') != primary_type for b in benchmarks):
+        st.warning(
+            "⚠️ **TR/PR Mismatch:** You are comparing a Total Return ETF with a Price Return Index "
+            "(or vice-versa). The ETF will appear to outperform due to dividends. "
+            "See the **Help & Guide** tab → *TR vs PR* section for details."
+        )
+
+    # ── Row 1: KPIs ──────────────────────────────────────────
+    render_kpi_dashboard(
+        meta['name'], current_ret, current_cagr, win_rate, rank_str,
+        avg_ret, mean_cagr, p50_ret, p30_ret, max_dd, worst_ret
+    )
+
+    # ── Methodology Drill-down ──────────────────────────────
+    render_methodology_drilldown()
+
+    # ── Contextual KPI help strip ────────────────────────────
+    with st.expander("ℹ️ What do these KPIs mean?", expanded=False):
+        c1, c2, c3, c4 = st.columns(4)
+        c1.info("**Rolling Return** — The raw return if you had purchased this asset exactly N days ago and held until today.")
+        c2.info("**CAGR** — Same return, annualized so all windows are comparable. Formula: `(1 + R)^(252/N) - 1`")
+        c3.info("**Win Rate** — % of all historical N-day windows that were profitable. >70% = very consistent.")
+        c4.info("**Universe Rank** — Today's rank among all 21 assets. #1 = highest rolling return right now.")
+
+    # ── Row 2: Time-Series Chart ─────────────────────────────
+    b_dict = {b: rolling_returns[b].dropna() for b in benchmarks}
+    
+    # Calculate 2D Regime for background shading
+    daily_rets = sliced_master_matrix[primary_ticker].dropna().pct_change().dropna()
+    vol_series = daily_rets.rolling(window=min(252, len(daily_rets)//2)).std() * np.sqrt(252)
+    regime_series = classify_regime_2d(vol_series, sliced_master_matrix[primary_ticker].dropna(), window=min(252, len(daily_rets)//2))
+    
+    render_timeseries_chart(primary_returns, b_dict, percentiles, title=f"Rolling {window_label} Returns vs Universe",
+                            regime_series=regime_series)
+
+    # Chart help strip
+    with st.expander("ℹ️ How to read this chart", expanded=False):
+        st.markdown("""
+        - 🔵 **Blue line** — Rolling return of the selected primary asset at each historical date.
+        - ⬜ **Grey band** — 25th to 75th percentile of the entire 21-asset universe. This is the "normal zone."
+        - ➖ **Dashed grey line** — Universe Median (50th percentile).
+        - 🔴 **Red lines** — Benchmark overlays selected in the sidebar.
+        
+        **Tactical signals:**
+        - Blue line **above** the grey band → Asset is in the **top 25%** of the universe *(momentum / extended)*
+        - Blue line **inside** the grey band → Asset is **average** *(neutral)*
+        - Blue line **below** the grey band → Asset is in the **bottom 25%** *(value / mean-reversion candidate)*
+        """)
+
+    # ── Row 3: Distribution & Risk Analytics ─────────────────
+    col_dist, col_stats = st.columns(2)
+    with col_dist:
+        render_distribution_matrix(primary_returns)
+        with st.expander("ℹ️ Reading the distribution", expanded=False):
+            st.markdown("""
+            This histogram shows the **frequency of all historical rolling returns**.
+            - A **right-skewed** distribution means large positive returns happen more often (e.g., Gold).
+            - A **left-skewed** distribution means crash risk is higher than average.
+            - If today's return is in the **far right tail**, the asset is at a historical peak — consider elevated reversion risk.
+            """)
+
+    with col_stats:
+        st.markdown("### 🔬 Risk Analytics")
+        import importlib.util
+        if importlib.util.find_spec("vectorbt"):
+            try:
+                # Fix: Use daily returns for statistics, not rolling returns
+                daily_returns = master_matrix[primary_ticker].dropna().pct_change().dropna()
+                # Calculate stats with daily frequency to enable Sharpe/Sortino
+                stats = _cached_vbt_stats(daily_returns)
+                
+                # --- Humanization & Alignment ---
+                # Select and rename metrics for clarity and documentation alignment
+                keep_metrics = {
+                    'Start': 'Start Date',
+                    'End': 'End Date',
+                    'Total Return [%]': 'Total Return (%)',
+                    'Max Drawdown [%]': 'Worst Historical Loss (%)',
+                    'Sharpe Ratio': 'Sharpe Ratio (Risk-Adj)',
+                    'Sortino Ratio': 'Sortino Ratio (Downside-Adj)',
+                    'Tail Ratio': 'Tail Ratio (Upside/Downside)',
+                    'Kurtosis': 'Kurtosis (Crash Probability)'
+                }
+                
+                # Filter existing metrics
+                available_metrics = [m for m in keep_metrics.keys() if m in stats.index]
+                stats_filtered = stats[available_metrics].copy()
+                
+                # Format values for "Normal Investors"
+                stats_display = {}
+                for old_key, new_label in keep_metrics.items():
+                    if old_key not in stats_filtered:
+                        continue
+                    val = stats_filtered[old_key]
+                    
+                    if 'Date' in new_label or old_key in ['Start', 'End']:
+                        # Format date to YYYY-MM-DD
+                        stats_display[new_label] = pd.to_datetime(val).strftime('%Y-%m-%d')
+                    elif '(%)' in new_label:
+                        # Round percentages to 2 decimal places
+                        stats_display[new_label] = f"{val:.2f}%"
+                    else:
+                        # Round ratios to 2 decimal places
+                        stats_display[new_label] = f"{val:.2f}"
+                
+                # Render as a clean table
+                st.table(pd.Series(stats_display, name="Value"))
+            except Exception as e:
+                st.info(f"ℹ️ Detailed statistics require a longer history.")
+                # st.write(e) # Debugging
+        else:
+            st.markdown("Detailed stats requires vectorbt.")
+
+        with st.expander("ℹ️ Key risk metrics explained", expanded=False):
+            st.markdown("""
+            | Metric | Good level | Interpretation |
+            |---|---|---|
+            | **Max Drawdown** | < 30% | Worst peak-to-trough loss in history |
+            | **Sharpe Ratio** | > 1.0 | Risk-adjusted return; >2 is excellent |
+            | **Sortino Ratio** | > 1.5 | Like Sharpe, but penalises only downside volatility |
+            | **Tail Ratio** | > 1.0 | Upside tail larger than downside tail |
+            | **Kurtosis** | < 4 | >3 means fatter crash tails than a normal distribution |
+            """)
