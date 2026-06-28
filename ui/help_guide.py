@@ -198,7 +198,8 @@ def render_help_guide():
         | **Equity - Broad** | `^BSESN` | S&P BSE Sensex Index | Benchmark broad index (Price Return) |
         | **Equity - Broad** | `JUNIORBEES.NS` | Nippon India Nifty Next 50 ETF | Tracks Nifty Next 50 (Total Return) |
         | **Equity - Broad** | `MID150BEES.NS` | Nippon India Nifty Midcap 150 ETF | Tracks Nifty Midcap 150 (Total Return) |
-        | **Equity - Broad** | `HDFCSML250.NS` | HDFC Nifty Smallcap 250 ETF | Tracks Nifty Smallcap 250 (Total Return) |
+        | **Equity - Broad** | `NIFTY_MIDCAP_100.NS` | Nifty Midcap 100 Index | Benchmark mid-cap index (Price Return) |
+        | **Equity - Broad** | `0P0001NJAX.BO` | ICICI Pru Nifty Smallcap 250 Index Fund | Tracks Nifty Smallcap 250 (Total Return) |
         | **Equity - Sector** | `^NSEBANK` | Nifty Bank Index | Banking sector index (Price Return) |
         | **Equity - Sector** | `^CNXIT` | Nifty IT Index | Information Technology index (Price Return) |
         | **Equity - Sector** | `^CNXPHARMA` | Nifty Pharma Index | Pharmaceuticals index (Price Return) |

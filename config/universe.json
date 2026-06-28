@@ -23,11 +23,17 @@
     "type": "TR",
     "inception": "2019-01-31"
   },
-  "HDFCSML250.NS": {
-    "name": "HDFC Nifty Smallcap 250 ETF",
+  "NIFTY_MIDCAP_100.NS": {
+    "name": "Nifty Midcap 100 Index",
+    "class": "Broad Market - Midcap",
+    "type": "PR",
+    "inception": "2005-09-26"
+  },
+  "0P0001NJAX.BO": {
+    "name": "ICICI Pru Nifty Smallcap 250 Index Fund",
     "class": "Broad Market - Smallcap",
     "type": "TR",
-    "inception": "2023-02-15"
+    "inception": "2021-11-02"
   },
   "^NSEBANK": {
     "name": "NIFTY Bank Index",

@@ -36,13 +36,14 @@ PE_BENCHMARKS = {
     "^HSI": {"start_pe": 14.0, "end_pe": 9.5, "min_pe": 6.0, "max_pe": 22.0},
     "^AXJO": {"start_pe": 18.0, "end_pe": 17.0, "min_pe": 9.0, "max_pe": 26.0},
     "EEM": {"start_pe": 15.0, "end_pe": 15.0, "min_pe": 7.0, "max_pe": 25.0},
+    "NIFTY_MIDCAP_100.NS": {"start_pe": 22.0, "end_pe": 18.0, "min_pe": 10.0, "max_pe": 35.0},
 }
 
 # Mapping of ETFs to their benchmark index fundamentals
 ETF_BENCHMARK_MAP = {
     "JUNIORBEES.NS": "^NSEI",     # Proxy Nifty Next 50 to Nifty 50 for valuation baseline
     "MID150BEES.NS": "^NSEI",     # Proxy Midcap to Nifty 50 baseline with shift
-    "HDFCSML250.NS": "^NSEI",     # Proxy Smallcap to Nifty 50 baseline
+    "0P0001NJAX.BO": "^NSEI",     # Proxy Smallcap to Nifty 50 baseline
     "PSUBNKBEES.NS": "^NSEBANK",  # Proxy PSU Bank to Bank Nifty baseline
     "INFRABEES.NS": "^NSEI",      # Proxy Infra to Nifty 50
     "MOM100.NS": "^NSEI",         # Proxy Momentum to Nifty 50
