@@ -4,6 +4,7 @@ import numpy as np
 import json
 import logging
 import sys
+import time
 from pathlib import Path
 import plotly.io as pio
 import vectorbt as vbt
@@ -71,27 +72,39 @@ def main():
         # Check if we should trigger an auto-update of data (only once per session)
         if "auto_updated_today" not in st.session_state:
             st.session_state["auto_updated_today"] = True
-            latest_cached_date = master_matrix.index.max()
-            today = pd.Timestamp.now().normalize()
             
-            # If the cached data is at least 1 day behind today, run incremental fetch
-            # We also check that today is not a weekend (Saturday=5, Sunday=6)
-            is_weekend = today.dayofweek in (5, 6)
+            # Check the modification time of the key cache file to enforce global freshness
+            ref_cache_file = CACHE_DIR / "^NSEI_raw.parquet"
+            should_fetch = True
             
-            if (today - latest_cached_date).days >= 1 and not is_weekend:
-                with st.spinner("🔄 Fetching fresh incremental market data..."):
-                    try:
-                        from data.fetcher import DataFetcher
-                        fetcher = DataFetcher()
-                        fetcher.fetch_all()
-                        
-                        from data.fundamentals_seed import main as seed_main
-                        seed_main()
-                        
-                        # Rerun to pick up the updated Parquet files
-                        st.rerun()
-                    except Exception as update_err:
-                        logging.warning(f"Failed to auto-update incremental cache: {update_err}")
+            if ref_cache_file.exists():
+                last_modified_time = ref_cache_file.stat().st_mtime
+                # If modified less than 4 hours ago (14400s), skip globally to prevent race conditions
+                if time.time() - last_modified_time < 14400:
+                    should_fetch = False
+            
+            if should_fetch:
+                latest_cached_date = master_matrix.index.max()
+                today = pd.Timestamp.now().normalize()
+                
+                # If the cached data is at least 1 day behind today, run incremental fetch
+                # We also check that today is not a weekend (Saturday=5, Sunday=6)
+                is_weekend = today.dayofweek in (5, 6)
+                
+                if (today - latest_cached_date).days >= 1 and not is_weekend:
+                    with st.spinner("🔄 Fetching fresh incremental market data..."):
+                        try:
+                            from data.fetcher import DataFetcher
+                            fetcher = DataFetcher()
+                            fetcher.fetch_all()
+                            
+                            from data.fundamentals_seed import main as seed_main
+                            seed_main()
+                            
+                            # Rerun to pick up the updated Parquet files
+                            st.rerun()
+                        except Exception as update_err:
+                            logging.warning(f"Failed to auto-update incremental cache: {update_err}")
     except Exception as e:
         # Check if any active tickers in the universe are missing their raw cache files
         missing_cache = False

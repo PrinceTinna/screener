@@ -3,6 +3,9 @@ import pandas as pd
 import numpy as np
 import json
 import logging
+import time
+import random
+import requests
 from datetime import datetime
 from pathlib import Path
 from config.settings import CACHE_DIR, CONFIG_DIR, FETCH_START_YEAR
@@ -14,6 +17,14 @@ class DataFetcher:
         self.universe_path = CONFIG_DIR / "universe.json"
         with open(self.universe_path, 'r') as f:
             self.universe = json.load(f)
+        
+        # Initialize a custom session with standard browser headers to bypass yfinance scraper blocks
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5"
+        })
             
     def _adjust_unadjusted_splits(self, df, ticker):
         """
@@ -155,80 +166,123 @@ class DataFetcher:
         if end_date is None:
             end_date = datetime.today().strftime('%Y-%m-%d')
             
+        lock_file = CACHE_DIR / "data.lock"
+        
+        # Concurrency Lock Mutex
+        if lock_file.exists():
+            # If the lock file is older than 5 minutes, it's likely a leftover from a crashed run
+            if time.time() - lock_file.stat().st_mtime > 300:
+                logger.warning("Found a stale lock file. Removing it to proceed.")
+                try:
+                    lock_file.unlink()
+                except Exception:
+                    pass
+            else:
+                logger.warning("Data fetch is currently locked by another process. Waiting...")
+                for _ in range(10):
+                    time.sleep(1)
+                    if not lock_file.exists():
+                        break
+                else:
+                    logger.error("Lock file still present. Exiting to prevent concurrency collision.")
+                    return {}
+
+        # Create lock file
+        try:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            lock_file.touch()
+        except Exception as e:
+            logger.warning(f"Could not create lock file: {e}")
+
         all_data = {}
         
-        for ticker, metadata in self.universe.items():
-            cache_file = CACHE_DIR / f"{ticker}_raw.parquet"
-            df_cached = None
-            start_date = f"{FETCH_START_YEAR}-01-01"
-            
-            if cache_file.exists():
-                try:
-                    df_cached = pd.read_parquet(cache_file)
-                    if not df_cached.empty:
-                        last_date = df_cached.index.max()
-                        # Start fetch 1 day after the last cached date
-                        start_date = (last_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
-                except Exception as cache_err:
-                    logger.warning(f"Error reading raw cache for {ticker}, falling back to full fetch: {cache_err}")
-            
-            # If start_date >= end_date, we don't need to fetch
-            if pd.to_datetime(start_date) >= pd.to_datetime(end_date):
-                logger.info(f"Ticker {ticker} is already up to date (Last date: {start_date}). Skipping fetch.")
-                if df_cached is not None:
-                    all_data[ticker] = df_cached
-                continue
+        try:
+            for ticker, metadata in self.universe.items():
+                cache_file = CACHE_DIR / f"{ticker}_raw.parquet"
+                df_cached = None
+                start_date = f"{FETCH_START_YEAR}-01-01"
                 
-            logger.info(f"Fetching incremental data for {ticker} from {start_date} to {end_date}")
-            
-            try:
-                df_new = yf.download(ticker, start=start_date, end=end_date, progress=False)
+                if cache_file.exists():
+                    try:
+                        df_cached = pd.read_parquet(cache_file)
+                        if not df_cached.empty:
+                            last_date = df_cached.index.max()
+                            # Start fetch 1 day after the last cached date
+                            start_date = (last_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+                    except Exception as cache_err:
+                        logger.warning(f"Error reading raw cache for {ticker}, falling back to full fetch: {cache_err}")
                 
-                if df_new.empty:
-                    logger.warning(f"No new data returned for {ticker}")
+                # If start_date >= end_date, we don't need to fetch
+                if pd.to_datetime(start_date) >= pd.to_datetime(end_date):
+                    logger.info(f"Ticker {ticker} is already up to date (Last date: {start_date}). Skipping fetch.")
                     if df_cached is not None:
                         all_data[ticker] = df_cached
                     continue
-                
-                # yFinance sometimes returns multi-index columns for single tickers in newer versions
-                if isinstance(df_new.columns, pd.MultiIndex):
-                    df_new.columns = df_new.columns.get_level_values(0)
-                
-                # Combine cached and new data
-                if df_cached is not None:
-                    df = pd.concat([df_cached, df_new])
-                else:
-                    df = df_new
                     
-                df = df[~df.index.duplicated(keep='last')].sort_index()
+                # Sleep jitter (Rate Limiting) before making the active network call
+                time.sleep(random.uniform(1.0, 2.5))
+                logger.info(f"Fetching incremental data for {ticker} from {start_date} to {end_date}")
+                
+                try:
+                    df_new = yf.download(
+                        ticker, 
+                        start=start_date, 
+                        end=end_date, 
+                        progress=False, 
+                        session=self.session
+                    )
                     
-                # Correct unadjusted splits in yfinance download stream
-                df = self._adjust_unadjusted_splits(df, ticker)
-                
-                # Sanitize price bars for negative/zero prices and boundary errors
-                df = self._sanitize_price_bars(df, ticker)
+                    if df_new.empty:
+                        logger.warning(f"No new data returned for {ticker}")
+                        if df_cached is not None:
+                            all_data[ticker] = df_cached
+                        continue
                     
-                # We save the full OHLCV context as requested
-                cols_to_keep = ['Open', 'High', 'Low', 'Close', 'Volume']
-                if 'Adj Close' in df.columns:
-                    cols_to_keep.append('Adj Close')
+                    # yFinance sometimes returns multi-index columns for single tickers in newer versions
+                    if isinstance(df_new.columns, pd.MultiIndex):
+                        df_new.columns = df_new.columns.get_level_values(0)
                     
-                df = df[[c for c in cols_to_keep if c in df.columns]]
-                
-                # Save purely raw data to cache
-                cache_file.parent.mkdir(parents=True, exist_ok=True)
-                df.to_parquet(cache_file)
-                
-                # --- Sync fundamentals ---
-                self.update_fundamentals_cache(ticker, df)
-                
-                all_data[ticker] = df
-                
-            except Exception as e:
-                logger.error(f"Error fetching {ticker}: {e}")
-                if df_cached is not None:
-                    all_data[ticker] = df_cached
-                
+                    # Combine cached and new data
+                    if df_cached is not None:
+                        df = pd.concat([df_cached, df_new])
+                    else:
+                        df = df_new
+                        
+                    df = df[~df.index.duplicated(keep='last')].sort_index()
+                        
+                    # Correct unadjusted splits in yfinance download stream
+                    df = self._adjust_unadjusted_splits(df, ticker)
+                    
+                    # Sanitize price bars for negative/zero prices and boundary errors
+                    df = self._sanitize_price_bars(df, ticker)
+                        
+                    # We save the full OHLCV context as requested
+                    cols_to_keep = ['Open', 'High', 'Low', 'Close', 'Volume']
+                    if 'Adj Close' in df.columns:
+                        cols_to_keep.append('Adj Close')
+                        
+                    df = df[[c for c in cols_to_keep if c in df.columns]]
+                    
+                    # Save purely raw data to cache
+                    cache_file.parent.mkdir(parents=True, exist_ok=True)
+                    df.to_parquet(cache_file)
+                    
+                    # --- Sync fundamentals ---
+                    self.update_fundamentals_cache(ticker, df)
+                    
+                    all_data[ticker] = df
+                    
+                except Exception as e:
+                    logger.error(f"Error fetching {ticker}: {e}")
+                    if df_cached is not None:
+                        all_data[ticker] = df_cached
+        finally:
+            if lock_file.exists():
+                try:
+                    lock_file.unlink()
+                except Exception:
+                    pass
+                    
         return all_data
 
     def update_fundamentals_cache(self, ticker, df_price):
