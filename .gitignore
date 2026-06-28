@@ -42,6 +42,6 @@ Thumbs.db
 
 # Quant Dashboard Specifics
 # Ignore downloaded/cached market data
-data/.cache/
+data/cache/
 *.parquet
 *.csv

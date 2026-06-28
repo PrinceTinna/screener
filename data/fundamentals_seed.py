@@ -12,7 +12,7 @@ logger = logging.getLogger("fundamentals_seed")
 BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_DIR = BASE_DIR / "config"
 DATA_DIR = BASE_DIR / "data"
-CACHE_DIR = DATA_DIR / ".cache"
+CACHE_DIR = DATA_DIR / "cache"
 
 def load_universe():
     with open(CONFIG_DIR / "universe.json", "r") as f:
