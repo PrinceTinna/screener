@@ -68,10 +68,16 @@ def main():
         master_matrix = load_and_validate_matrix_v2(cache_hash)
         pe_matrix, eps_matrix = load_fundamentals_matrices(master_matrix.index, cache_hash)
     except Exception as e:
-        # Check if the cache directory is empty (which happens on first-time git clone/deploy)
-        cache_files = list(CACHE_DIR.glob("*.parquet"))
-        if not cache_files:
-            st.info("🔄 **First-time deployment detected:** Downloading and building local data cache. Please wait (takes ~30s)...")
+        # Check if any active tickers in the universe are missing their raw cache files
+        missing_cache = False
+        for ticker in universe.keys():
+            raw_file = CACHE_DIR / f"{ticker}_raw.parquet"
+            if not raw_file.exists():
+                missing_cache = True
+                break
+                
+        if missing_cache:
+            st.info("🔄 **Missing data caches detected:** Downloading and building local data cache. Please wait (takes ~30s)...")
             try:
                 # Dynamically fetch the data
                 from data.fetcher import DataFetcher
