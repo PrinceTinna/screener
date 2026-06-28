@@ -162,8 +162,6 @@ def render(master_matrix: pd.DataFrame, primary_ticker: str,
     """
     Renders Tab 2: Signals (Execution Layer) with Regime-Aware Hysteresis.
     """
-    st.markdown("## 🎯 Regime-Aware Signal Engine")
-    st.markdown("Production-grade directives conditioned by volatility regime and trend direction.")
 
     if universe is not None and primary_ticker in universe:
         meta = universe[primary_ticker]

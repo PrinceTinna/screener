@@ -22,8 +22,6 @@ def render(master_matrix: pd.DataFrame, universe: dict, primary_ticker: str, ben
     """
     Renders Tab 1: Asset Dashboard (Pure Analysis Layer).
     """
-    st.markdown("## 📊 Asset Dashboard")
-    st.markdown("Strict historical profiling of returns and volatility.")
     
     # Use pre-computed rolling returns if provided, else calculate locally
     if rolling_returns is not None:
