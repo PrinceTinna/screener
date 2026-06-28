@@ -122,6 +122,10 @@ def main():
     # ── Sidebar ─────────────────────────────────────────────────
     st.sidebar.header("Control Panel")
 
+    if st.sidebar.button("🔄 Force Refetch Live Data", help="Clears local Streamlit caches and pulls fresh yfinance metrics."):
+        st.cache_data.clear()
+        st.rerun()
+
     # --- 1. Asset Class Filter ---
     all_classes = set()
     for meta in universe.values():

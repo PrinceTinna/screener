@@ -64,12 +64,37 @@ def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
         meta = universe.get(ticker, {})
         segment = meta.get('class', 'Other').split(' - ')[0]
         
-        # Calculate Bubble Z-Score using lifetime history of the asset
+        # Calculate Bubble Z-Score using lifetime history of the asset (with Check B: 1000 days history guard)
         price_series = master_matrix[ticker].dropna()
-        bubble_z_series = calculate_bubble_z_score(price_series)
-        latest_bubble_z = bubble_z_series.iloc[-1] if not bubble_z_series.empty else np.nan
-        bubble_class = classify_bubble_status(latest_bubble_z)
+        if len(price_series) < 1000:
+            bubble_class = {
+                "label": "🟡 Insufficient History"
+            }
+        else:
+            bubble_z_series = calculate_bubble_z_score(price_series)
+            latest_bubble_z = bubble_z_series.iloc[-1] if not bubble_z_series.empty else np.nan
+            bubble_class = classify_bubble_status(latest_bubble_z)
+            
+        # Check D: Cross-Sectional Synchronization Guard
+        from config.settings import CACHE_DIR
+        raw_path = CACHE_DIR / f"{ticker}_raw.parquet"
+        is_stale = False
+        if raw_path.exists():
+            try:
+                last_raw_date = pd.read_parquet(raw_path, columns=[]).index[-1]
+                last_raw_date = pd.to_datetime(last_raw_date)
+                target_date = master_matrix.index[-1]
+                # Exclude if it's lagging by more than 3 business days (~5 calendar days)
+                if (target_date - last_raw_date).days > 5:
+                    is_stale = True
+            except Exception:
+                is_stale = True
         
+        # If the ticker is stale or has less than 252 days of history, exclude its return from ranking
+        raw_cagr = latest_cagr[ticker]
+        if is_stale or len(price_series) < 252:
+            raw_cagr = np.nan
+            
         # Get PE and EPS from matrices
         latest_pe = np.nan
         eps_growth = np.nan
@@ -96,7 +121,7 @@ def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
             "Bubble Risk": bubble_class["label"],
             "P/E Ratio": latest_pe,
             "YoY EPS Growth (%)": eps_growth,
-            "_raw_cagr": latest_cagr[ticker],
+            "_raw_cagr": raw_cagr,
             "_raw_z": latest_z[ticker]
         })
     
@@ -108,6 +133,20 @@ def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
     
     # 4. Signal Badge Logic (Simplified for Screener)
     def get_badge(row):
+        ticker = row['Ticker']
+        price_series = master_matrix[ticker].dropna()
+        if len(price_series) < 252:
+            return "🟡 Insufficient History"
+            
+        # Check C: Fat-Tail Outlier CAGR Cap
+        cagr = row['_raw_cagr']
+        if pd.isna(cagr) or cagr > 1.50:
+            if not pd.isna(cagr) and cagr > 1.50:
+                price_slice = price_series.tail(252)
+                missing_pct = price_slice.isna().sum() / 252
+                if missing_pct > 0.05:
+                    return "🔴 High Uncertainty"
+                    
         if row['_raw_z'] < -1.5: return "🔴 Reversal"
         if row['_raw_z'] > 1.5: return "🟢 Momentum"
         return "🟡 Neutral"

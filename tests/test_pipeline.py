@@ -113,3 +113,32 @@ def test_signals_valuation_gate():
     assert "🟢 Momentum" in signal_fair["signal"]
     assert signal_fair["badge"] == "success"
 
+def test_fetcher_price_bar_sanitization():
+    """Verify that _sanitize_price_bars corrects open-high-low-close boundaries and zero/negative prices."""
+    from data.fetcher import DataFetcher
+    fetcher = DataFetcher()
+    
+    # Create a corrupted mock DataFrame
+    df = pd.DataFrame({
+        "Open": [10.0, -5.0, 10.0],
+        "High": [8.0, 10.0, 10.0],  # row 0 has High < Open
+        "Low": [12.0, 5.0, 8.0],   # row 0 has Low > Open
+        "Close": [10.0, 10.0, 10.0],
+        "Volume": [100.0, 100.0, -50.0]  # row 2 has negative volume
+    })
+    
+    df_clean = fetcher._sanitize_price_bars(df, "MOCK_TICKER")
+    
+    # Assert negative Open was masked to NaN
+    assert pd.isna(df_clean.loc[1, "Open"])
+    
+    # Assert High < Open was corrected to Open
+    assert df_clean.loc[0, "High"] == 10.0
+    
+    # Assert Low > Open was corrected to Open/Close min
+    assert df_clean.loc[0, "Low"] == 10.0
+    
+    # Assert negative Volume was corrected to 0
+    assert df_clean.loc[2, "Volume"] == 0.0
+
+

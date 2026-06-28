@@ -15,11 +15,12 @@ class DataFetcher:
         with open(self.universe_path, 'r') as f:
             self.universe = json.load(f)
             
-    def _adjust_unadjusted_splits(self, df):
+    def _adjust_unadjusted_splits(self, df, ticker):
         """
         Detects and corrects unadjusted stock splits in historical prices (where yfinance fails to adjust history).
-        Uses daily returns to detect vertical drops of >35% on a single day, solves for the ratio,
-        and divides all historical prices before that date by the split ratio.
+        Uses a dual-gate validation layer:
+        Gate A (Index-Reference Cross-Check): Compares drop to tracking index performance.
+        Gate B (Corporate Actions table): Validates split date and ratio via yfinance splits API.
         """
         if df.empty or 'Close' not in df.columns:
             return df
@@ -41,14 +42,112 @@ class DataFetcher:
                 target_ratios = [2, 3, 4, 5, 10, 20]
                 split_ratio = min(target_ratios, key=lambda x: abs(x - estimated_ratio))
                 
-                # Verify that it is a valid split ratio (within 15% of estimated)
-                if abs(estimated_ratio - split_ratio) / split_ratio < 0.15:
-                    logger.warning(f"🛡️ Data Ingestion: Detected unadjusted stock split of {split_ratio}:1 on {s_date.date()} for asset. Adjusting history prior to this date.")
-                    price_cols = ['Open', 'High', 'Low', 'Close', 'Adj Close']
-                    for col in price_cols:
-                        if col in df.columns:
-                            df.loc[df.index < s_date, col] = df.loc[df.index < s_date, col] / split_ratio
+                # --- Gate A: Index-Reference Cross-Check ---
+                gate_a_passed = False
+                from core.validator import ETF_BENCHMARK_MAP
+                benchmark = ETF_BENCHMARK_MAP.get(ticker)
+                
+                if benchmark:
+                    bench_file = CACHE_DIR / f"{benchmark}_raw.parquet"
+                    if bench_file.exists():
+                        try:
+                            bench_df = pd.read_parquet(bench_file)
+                            if not bench_df.empty and 'Close' in bench_df.columns:
+                                bench_close = bench_df['Close']
+                                if s_date in bench_close.index:
+                                    bench_idx = bench_close.index.get_loc(s_date)
+                                    if bench_idx > 0:
+                                        bench_return = bench_close.iloc[bench_idx] / bench_close.iloc[bench_idx - 1] - 1.0
+                                        # If the benchmark index dropped by less than 5%, then Gate A passes (it was a split, not a crash)
+                                        if bench_return > -0.05:
+                                            gate_a_passed = True
+                                            logger.info(f"🛡️ Split Gate A Passed: Ticker {ticker} benchmark {benchmark} change on {s_date.date()} was {bench_return:.2%}. Safe to split-adjust.")
+                        except Exception as e:
+                            logger.warning(f"Error checking benchmark split reference for {ticker} (benchmark {benchmark}): {e}")
+                
+                # --- Gate B: Corporate Actions API Verification ---
+                gate_b_passed = False
+                found_ratio = None
+                try:
+                    splits_series = yf.Ticker(ticker).splits
+                    if not splits_series.empty:
+                        for split_date, ratio in splits_series.items():
+                            # splits indexing timezone may differ, compare dates
+                            if abs((pd.to_datetime(split_date).tz_localize(None) - s_date.tz_localize(None)).days) <= 3:
+                                gate_b_passed = True
+                                found_ratio = float(ratio)
+                                logger.info(f"🛡️ Split Gate B Passed: Ticker {ticker} splits record found ratio {found_ratio} near {s_date.date()}.")
+                                break
+                except Exception as e:
+                    logger.warning(f"Could not fetch yfinance splits corporate actions for {ticker}: {e}")
+                
+                # --- Decision Logic ---
+                if gate_b_passed and found_ratio is not None:
+                    # Gate B is the highest fidelity source, use its exact ratio
+                    split_ratio = found_ratio
+                elif gate_a_passed:
+                    # Gate A passed (index didn't drop), but Gate B was missing splits entry (typical for Indian ETFs).
+                    # Verify estimated ratio is standard:
+                    if abs(estimated_ratio - split_ratio) / split_ratio < 0.15:
+                        pass # use standard estimated split_ratio
+                    else:
+                        logger.warning(f"❌ Split adjustment cancelled for {ticker} on {s_date.date()}: Estimated ratio {estimated_ratio:.2f} deviates too far from standard ratios.")
+                        continue
+                else:
+                    # Both gates failed (or Gate A was not available and Gate B had no entry)
+                    logger.warning(f"❌ Split adjustment REJECTED/CANCELLED for {ticker} on {s_date.date()}. Both Index-Reference and Splits API Gates failed. Possible actual market crash.")
+                    continue
+                
+                logger.warning(f"🛡️ Data Ingestion: Adjusting history for {ticker} prior to {s_date.date()} by split ratio of {split_ratio:.2f}:1")
+                price_cols = ['Open', 'High', 'Low', 'Close', 'Adj Close']
+                for col in price_cols:
+                    if col in df.columns:
+                        df.loc[df.index < s_date, col] = df.loc[df.index < s_date, col] / split_ratio
                             
+        return df
+
+    def _sanitize_price_bars(self, df, ticker):
+        """
+        Validates open-high-low-close boundaries, negative/zero pricing, and volume anomalies.
+        Masks corrupted entries to prevent NaN/JIT engine failures.
+        """
+        if df.empty:
+            return df
+            
+        # 1. Negative/Zero prices check: mask to NaN
+        mask_cols = ['Open', 'High', 'Low', 'Close', 'Adj Close']
+        for col in mask_cols:
+            if col in df.columns:
+                invalid_mask = df[col] <= 0
+                if invalid_mask.any():
+                    logger.warning(f"⚠️ Data Sanity: Found negative/zero values in {col} for {ticker}. Masking to NaN.")
+                    df.loc[invalid_mask, col] = np.nan
+                    
+        # 2. High Boundary: High must be >= Open and >= Close
+        if 'High' in df.columns:
+            for col in ['Open', 'Close']:
+                if col in df.columns:
+                    mismatch = df['High'] < df[col]
+                    if mismatch.any():
+                        logger.warning(f"⚠️ Data Sanity: High < {col} for {ticker}. Adjusting High boundary.")
+                        df.loc[mismatch, 'High'] = df.loc[mismatch, [col, 'High']].max(axis=1)
+                        
+        # 3. Low Boundary: Low must be <= Open and <= Close
+        if 'Low' in df.columns:
+            for col in ['Open', 'Close']:
+                if col in df.columns:
+                    mismatch = df['Low'] > df[col]
+                    if mismatch.any():
+                        logger.warning(f"⚠️ Data Sanity: Low > {col} for {ticker}. Adjusting Low boundary.")
+                        df.loc[mismatch, 'Low'] = df.loc[mismatch, [col, 'Low']].min(axis=1)
+                        
+        # 4. Volume Check: Volume must be >= 0
+        if 'Volume' in df.columns:
+            invalid_volume = df['Volume'] < 0
+            if invalid_volume.any():
+                logger.warning(f"⚠️ Data Sanity: Negative volume found for {ticker}. Setting to 0.")
+                df.loc[invalid_volume, 'Volume'] = 0.0
+                
         return df
 
     def fetch_all(self, end_date=None):
@@ -76,7 +175,10 @@ class DataFetcher:
                     df.columns = df.columns.get_level_values(0)
                     
                 # Correct unadjusted splits in yfinance download stream
-                df = self._adjust_unadjusted_splits(df)
+                df = self._adjust_unadjusted_splits(df, ticker)
+                
+                # Sanitize price bars for negative/zero prices and boundary errors
+                df = self._sanitize_price_bars(df, ticker)
                     
                 # We save the full OHLCV context as requested
                 cols_to_keep = ['Open', 'High', 'Low', 'Close', 'Volume']

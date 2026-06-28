@@ -25,7 +25,7 @@ ETF_BENCHMARK_MAP = {
     "LOWVOL.NS": "^NSEI"
 }
 
-@st.cache_data(ttl=3600)  # Cache yfinance lookups for 1 hour to prevent API throttling
+@st.cache_data(ttl=86400)  # Cache yfinance lookups for 24 hours to prevent API throttling
 def fetch_live_etf_pes():
     """Fetches live P/E values from yfinance for validator benchmarks."""
     live_pes = {}
@@ -57,6 +57,19 @@ def run_valuation_cross_check(pe_matrix: pd.DataFrame, eps_matrix: pd.DataFrame,
             sim_pe = pe_matrix[index_ticker].dropna().iloc[-1]
             if pd.isna(sim_pe) or sim_pe <= 0:
                 continue
+                
+            # Check E: Live Valuation Outlier Threshold (5-sigma check over last 3 years)
+            hist_pe = pe_matrix[index_ticker].dropna().tail(756) # 3 years @ 252 days/yr
+            if len(hist_pe) > 30:
+                mean_pe = hist_pe.mean()
+                std_pe = hist_pe.std()
+                if std_pe > 0 and abs(live_pe - mean_pe) > 5 * std_pe:
+                    logger.warning(
+                        f"⚠️ Live Valuation Outlier: Live P/E for {index_ticker} is {live_pe:.1f}x, "
+                        f"deviating by >5σ from 3y mean ({mean_pe:.1f}x ± {std_pe:.1f}x). Ignoring live reference."
+                    )
+                    continue
+                    
             variance = abs(sim_pe - live_pe) / live_pe
             if variance > threshold:
                 alerts.append({

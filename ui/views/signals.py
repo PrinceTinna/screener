@@ -38,11 +38,20 @@ REGIME_STRATEGY = {
 
 def _evaluate_hysteresis_signal(z_score: float, rank_pct: float, slope: float,
                                  regime: str, prev_state: str = "Neutral", bubble_z: float = 0.0,
-                                 pe_percentile: float = np.nan) -> dict:
+                                 pe_percentile: float = np.nan, is_data_gap: bool = False) -> dict:
     """
     State-machine logic for signal generation with Hysteresis.
     Uses different entry/exit thresholds to prevent flickering.
     """
+    if is_data_gap:
+        return {
+            "signal": "🔴 High Uncertainty (Data Gap)",
+            "badge": "error",
+            "confidence": "Data Integrity Failure",
+            "detail": "Severe data gaps (missing price bars > 5%) combined with extreme CAGR outlier (>150%).",
+            "state": "High Uncertainty (Data Gap)"
+        }
+
     is_extreme_breakdown = regime == "Extreme Breakdown"
     is_high_vol = regime in ("Panic", "Recovery", "Extreme Breakdown")
     is_overvalued = not pd.isna(pe_percentile) and pe_percentile >= 0.90
@@ -173,78 +182,126 @@ def render(master_matrix: pd.DataFrame, primary_ticker: str,
         return
 
     price_series = master_matrix[primary_ticker].dropna()
-    if len(price_series) < 252:
-        st.warning("⚠️ Insufficient historical data for signal generation (need 252+ days).")
-        return
+    total_history_days = len(price_series)
 
     rolling_series = (rolling_returns_matrix[primary_ticker].dropna()
                       if rolling_returns_matrix is not None else None)
 
+    # Helper function for Check D: Cross-Sectional Sync Guard
+    def _apply_cross_sectional_sync_guard(returns_series: pd.Series, target_date: pd.Timestamp) -> pd.Series:
+        from config.settings import CACHE_DIR
+        clean_series = returns_series.copy()
+        for tkr in clean_series.index:
+            raw_path = CACHE_DIR / f"{tkr}_raw.parquet"
+            if raw_path.exists():
+                try:
+                    last_raw_date = pd.to_datetime(pd.read_parquet(raw_path, columns=[]).index[-1])
+                    if (target_date - last_raw_date).days > 5:
+                        clean_series[tkr] = np.nan
+                except Exception:
+                    clean_series[tkr] = np.nan
+        return clean_series
+
     # ── Core Calculations ─────────────────────────────────────────────
     with st.spinner("Computing Regime & Signal State..."):
-        # Z-Score
-        z_series = calculate_z_score(
-            rolling_series if rolling_series is not None else price_series.pct_change(252).dropna(),
-            window=252
-        )
-        current_z = z_series.iloc[-1] if len(z_series.dropna()) > 0 else 0.0
-
-        # OLS Slope (10-day regression on rolling returns)
-        slope_input = rolling_series if rolling_series is not None else price_series.pct_change(252).dropna()
-        slope_series = calculate_ols_slope(slope_input, window=10)
-        current_slope = slope_series.iloc[-1] if len(slope_series.dropna()) > 0 else 0.0
-
-        # Volatility (rolling 252-day annualized)
-        daily_returns = price_series.pct_change().dropna()
-        vol_series = daily_returns.rolling(window=252).std() * np.sqrt(252)
-        current_vol = vol_series.iloc[-1] if len(vol_series.dropna()) > 0 else 0.0
-
-        # 2D Regime Classification
-        regime_series = classify_regime_2d(vol_series, price_series, window=252)
-        current_regime = regime_series.iloc[-1] if len(regime_series) > 0 else "Unknown"
-
-        # Segment Rank (cross-sectional)
-        if rolling_returns_matrix is not None:
-            latest_returns = rolling_returns_matrix.iloc[-1].dropna()
-            current_return = latest_returns.get(primary_ticker, 0.0)
-            rank_pct = (latest_returns < current_return).sum() / max(len(latest_returns), 1)
-        else:
-            rank_pct = 0.5  # Default to median if no cross-sectional data
-
-        # Get PE and calculate its historical percentile
+        # Default fallback values for short histories
+        current_z = 0.0
+        current_slope = 0.0
+        current_vol = 0.0
+        current_regime = "Unknown"
+        rank_pct = 0.5
         current_pe = np.nan
         pe_pct = np.nan
-        if pe_matrix is not None and primary_ticker in pe_matrix.columns:
-            ticker_pe = pe_matrix[primary_ticker].dropna()
-            if not ticker_pe.empty:
-                current_pe = ticker_pe.iloc[-1]
-                if len(ticker_pe) > 1:
-                    pe_pct = (ticker_pe < current_pe).sum() / len(ticker_pe)
+        current_bubble_z = np.nan
+        bubble_status = {
+            "status": "Insufficient History",
+            "badge": "warning",
+            "emoji": "🟡",
+            "label": "🟡 Insufficient History"
+        }
+        is_data_gap = False
+
+        if total_history_days >= 252:
+            # Z-Score
+            z_series = calculate_z_score(
+                rolling_series if rolling_series is not None else price_series.pct_change(252).dropna(),
+                window=252
+            )
+            current_z = z_series.iloc[-1] if len(z_series.dropna()) > 0 else 0.0
+
+            # OLS Slope (10-day regression on rolling returns)
+            slope_input = rolling_series if rolling_series is not None else price_series.pct_change(252).dropna()
+            slope_series = calculate_ols_slope(slope_input, window=10)
+            current_slope = slope_series.iloc[-1] if len(slope_series.dropna()) > 0 else 0.0
+
+            # Volatility (rolling 252-day annualized)
+            daily_returns = price_series.pct_change().dropna()
+            vol_series = daily_returns.rolling(window=252).std() * np.sqrt(252)
+            current_vol = vol_series.iloc[-1] if len(vol_series.dropna()) > 0 else 0.0
+
+            # 2D Regime Classification
+            regime_series = classify_regime_2d(vol_series, price_series, window=252)
+            current_regime = regime_series.iloc[-1] if len(regime_series) > 0 else "Unknown"
+
+            # Check D: Cross-Sectional Sync Guard
+            if rolling_returns_matrix is not None and not rolling_returns_matrix.empty:
+                sync_returns = _apply_cross_sectional_sync_guard(rolling_returns_matrix.iloc[-1], rolling_returns_matrix.index[-1])
+                latest_returns = sync_returns.dropna()
+                current_return = latest_returns.get(primary_ticker, 0.0)
+                rank_pct = (latest_returns < current_return).sum() / max(len(latest_returns), 1)
+
+            # Get PE and calculate its historical percentile
+            if pe_matrix is not None and primary_ticker in pe_matrix.columns:
+                ticker_pe = pe_matrix[primary_ticker].dropna()
+                if not ticker_pe.empty:
+                    current_pe = ticker_pe.iloc[-1]
+                    if len(ticker_pe) > 1:
+                        pe_pct = (ticker_pe < current_pe).sum() / len(ticker_pe)
+
+            # Check B: Bubble Detection Sample-Size Guard
+            if total_history_days >= 1000:
+                bubble_z_series = calculate_bubble_z_score(price_series)
+                current_bubble_z = bubble_z_series.iloc[-1] if not bubble_z_series.empty else np.nan
+                bubble_status = classify_bubble_status(current_bubble_z)
+
+            # Check C: Fat-Tail Outlier CAGR Cap
+            if rolling_series is not None and not rolling_series.empty:
+                cagr = rolling_series.iloc[-1]
+                if cagr > 1.50:
+                    price_slice = price_series.tail(252)
+                    missing_pct = price_slice.isna().sum() / 252
+                    if missing_pct > 0.05:
+                        is_data_gap = True
 
         # Hysteresis: Retrieve previous state from session
         prev_state = st.session_state.get(f"signal_state_{primary_ticker}", "Neutral")
 
-        # Calculate Bubble Z-Score over lifetime
-        bubble_z_series = calculate_bubble_z_score(price_series)
-        current_bubble_z = bubble_z_series.iloc[-1] if not bubble_z_series.empty else np.nan
-        bubble_status = classify_bubble_status(current_bubble_z)
-
         # Evaluate signal
-        signal = _evaluate_hysteresis_signal(
-            z_score=current_z,
-            rank_pct=rank_pct,
-            slope=current_slope,
-            regime=current_regime,
-            prev_state=prev_state,
-            bubble_z=current_bubble_z,
-            pe_percentile=pe_pct
-        )
+        if total_history_days < 252:
+            signal = {
+                "signal": "🟡 Insufficient History",
+                "badge": "warning",
+                "confidence": "Insufficient History",
+                "detail": "Asset must have at least 252 trading days (~1 year) of continuous data before any momentum indicator or signal is computed.",
+                "state": "Insufficient History"
+            }
+        else:
+            signal = _evaluate_hysteresis_signal(
+                z_score=current_z,
+                rank_pct=rank_pct,
+                slope=current_slope,
+                regime=current_regime,
+                prev_state=prev_state,
+                bubble_z=current_bubble_z,
+                pe_percentile=pe_pct,
+                is_data_gap=is_data_gap
+            )
 
         # Persist state for hysteresis
         st.session_state[f"signal_state_{primary_ticker}"] = signal["state"]
 
         # Arbitration Engine (existing)
-        engine = ArbitrationEngine(price_series, rolling_series)
+        engine = ArbitrationEngine(price_series, rolling_series if total_history_days >= 252 else None)
         action_grid = engine.generate_action_grid(current_z, price_series.iloc[-1], price_series.max())
         inversion_matrix = engine.run_inversion_matrix()
 

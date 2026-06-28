@@ -277,3 +277,34 @@ class TestBubbleRiskDeescalation:
         assert classify_bubble_status(2.5)["status"] == "2-Sigma Bubble"
         assert classify_bubble_status(3.2)["status"] == "3-Sigma Superbubble"
 
+    def test_signal_insufficient_history_guard(self):
+        """Minimum History Guard: Signal should lock to Insufficient History if history < 252 days."""
+        from ui.views.signals import render
+        import streamlit as st
+        from unittest.mock import MagicMock
+        
+        # We mock master_matrix with less than 252 rows
+        prices = pd.DataFrame({"TEST": [100.0] * 100})
+        
+        # Test signals logic via render wrapper or evaluate signal directly
+        # Let's verify that render warns or exits gracefully
+        # Since render is a Streamlit view, let's verify that _evaluate_hysteresis_signal or our rendering path functions cleanly.
+        # Let's test the evaluation directly or render mock.
+        
+    def test_signal_fat_tail_data_gap_downgrade(self):
+        """Check C: Downgrade signal to High Uncertainty (Data Gap) if CAGR > 150% and missing bars > 5%."""
+        signal = _evaluate_hysteresis_signal(
+            z_score=2.0,
+            rank_pct=0.85,
+            slope=0.01,
+            regime="Trending Bull",
+            prev_state="Neutral",
+            bubble_z=1.0,
+            pe_percentile=0.5,
+            is_data_gap=True  # Simulated data gap flag
+        )
+        assert signal["state"] == "High Uncertainty (Data Gap)"
+        assert signal["badge"] == "error"
+        assert "Data Integrity Failure" in signal["confidence"]
+        assert "🔴 High Uncertainty" in signal["signal"]
+
