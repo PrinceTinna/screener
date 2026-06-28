@@ -198,7 +198,22 @@ Detailed specifications and guidelines on data freshness, split-adjustment verif
 
 ---
 
-## 9. Changelog
+## 9. Data Cache Maintenance & CLI Updates
+To maintain high performance and avoid API rate limits, QuantPro isolates the data layer using an offline-first caching mechanism:
+* **Storage Location:** Raw and processed historical data are cached under [data/cache](file:///Users/princetinna/Documents/quant_dashboard2/data/cache).
+* **UI Ingestion Safety:** The Streamlit app does not perform any outbound network requests or downloads on page loads unless a critical universe asset cache is missing entirely.
+* **CLI Refetch Trigger:** Admins can manually pull fresh price history and re-generate valuation baselines by executing:
+  ```bash
+  # Step 1: Sync price series and incremental fundamentals
+  PYTHONPATH=. python3 data/fetcher.py
+
+  # Step 2: Seed index baseline valuation curves
+  PYTHONPATH=. python3 data/fundamentals_seed.py
+  ```
+
+---
+
+## 10. Changelog
 * v1.3.0: Initial phase 1.3 architecture definition.
 * v1.3.1: Complete instantiation of the Phase 1.3 Dashboard.
 * v1.3.2: Expanded asset universe to 21+ liquid Indian Indices and ETFs.
@@ -210,5 +225,6 @@ Detailed specifications and guidelines on data freshness, split-adjustment verif
 * v1.7.0: Integrated 2-Sigma and 3-Sigma Bubble Detection framework. Added $Z_{bubble}$ detrended lifetime indicator, Screener column, Asset Dashboard KPI card/chart shading, and execution de-escalation rule.
 * v1.8.0: [NEW] Sourced and cached historical P/E and YoY EPS Growth fundamentals. Integrated aligned fundamentals matrices into DataPipeline, added Screener data columns, added dual-axis P/E vs. EPS Growth charts to Asset Dashboard, implemented a Valuation Gate (percentile >= 90%) downgrade mechanism, and included interactive mathematical signal explanations in the UI.
 * v1.8.1: Cleaned up all redundant tracking ETFs (Nifty BeES, Bank BeES, QQQ, SPY, CPSE ETF, IT BeES, etc.) to track core benchmark indices directly, avoiding pricing drift warnings and local exchange premiums. Purged dead legacy files (`core/universe.py`, `ui/views/rolling_analysis.py`, `ui/views/single_asset.py`, and `ui/views/recommendations.py`) to streamline the workspace. Refactored test assertions and benchmark-linked fundamentals mapping.
+* v1.8.2: [NEW] Removed Force Refetch button from the UI to protect from yfinance throttling and offline crashes. Exposed cache refresh via admin CLI commands and documented operations.
 
 

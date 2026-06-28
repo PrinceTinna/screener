@@ -8,11 +8,11 @@ Under the hood, the backend functions as an N-dimensional matrix processing engi
 
 ## 🚀 Key Features
 
-*   **Tactical Allocation Engine:** Classifies market regimes and generates execution signals (`🟢 Momentum`, `🔴 Reversal`, `🟡 Neutral`) stabilized by OLS regression slope and hysteresis state machines.
-*   **Dual-Gate Split Ingestion:** Advanced ingestion adjuster that checks Yahoo Finance corporate action tables and cross-validates large price moves against benchmark reference indices before applying corrections.
-*   **Global Discovery Matrix:** Cross-sectional screener to group, rank, and compare sectors, smart-beta factors, commodities, and fixed income in real time.
-*   **Safety Guardrails:** Robust data quality checks locking signals under data anomalies (`🟡 Insufficient History`, `🔴 High Uncertainty (Data Gap)`, `Exclude Stale Assets`).
-*   **Valuation Protections:** Valuation Gate mechanism which flags and de-escalates momentum triggers when P/E ratios cross into the $\ge$ 90th historical percentile.
+*   **Tactical Allocation Engine:** Classifies market regimes and generates execution signals (`🟢 Momentum`, `🔴 Reversal`, `🟡 Neutral`) stabilized by OLS regression slope and hysteresis state machines
+*   **Dual-Gate Split Ingestion:** Advanced ingestion adjuster that checks Yahoo Finance corporate action tables and cross-validates large price moves against benchmark reference indices before applying corrections
+*   **Global Discovery Matrix:** Cross-sectional screener to group, rank, and compare sectors, smart-beta factors, commodities, and fixed income in real time
+*   **Safety Guardrails:** Robust data quality checks locking signals under data anomalies (`🟡 Insufficient History`, `🔴 High Uncertainty (Data Gap)`, `Exclude Stale Assets`)
+*   **Valuation Protections:** Valuation Gate mechanism which flags and de-escalates momentum triggers when P/E ratios cross into the $\ge$ 90th historical percentile
 
 ---
 

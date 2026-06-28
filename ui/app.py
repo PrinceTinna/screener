@@ -122,7 +122,7 @@ def main():
     # ── Sidebar ─────────────────────────────────────────────────
     st.sidebar.header("Control Panel")
 
-    if st.sidebar.button("🔄 Force Refetch Live Data", help="Clears local Streamlit caches and pulls fresh yfinance metrics."):
+    if st.sidebar.button("🧹 Clear Session Cache", help="Clears Streamlit's internal memory cache and refreshes the dashboard view. Does not fetch new market data."):
         st.cache_data.clear()
         st.rerun()
 
