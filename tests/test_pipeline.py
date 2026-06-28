@@ -142,3 +142,80 @@ def test_fetcher_price_bar_sanitization():
     assert df_clean.loc[2, "Volume"] == 0.0
 
 
+def test_fetcher_lock_file():
+    """Verify that fetch_all creates and cleans up the concurrency lock file."""
+    from data.fetcher import DataFetcher
+    from config.settings import CACHE_DIR
+    from unittest.mock import patch
+    
+    lock_file = CACHE_DIR / "data.lock"
+    if lock_file.exists():
+        lock_file.unlink()
+        
+    fetcher = DataFetcher()
+    # Mock universe to contain only one ticker to keep it fast
+    fetcher.universe = {"MOCK_TICKER": {"class": "Broad Market - Benchmark", "type": "PR", "inception": "2000-01-01"}}
+    
+    with patch("yfinance.download", return_value=pd.DataFrame()) as mock_download:
+        # Check that the lock file is created and cleaned up
+        fetcher.fetch_all(end_date="2026-06-28")
+        assert not lock_file.exists(), "Lock file should be deleted on completion"
+        
+        # Test locked scenario: create a fresh lock file and mock wait times
+        lock_file.touch()
+        with patch("time.sleep") as mock_sleep:
+            res = fetcher.fetch_all(end_date="2026-06-28")
+            # Should have attempted to sleep and wait
+            assert mock_sleep.call_count > 0
+            assert res == {}, "Should return empty dict on lock failure"
+            
+        # Cleanup
+        if lock_file.exists():
+            lock_file.unlink()
+
+
+def test_fetcher_incremental_logic():
+    """Verify that fetcher fetches incrementally if cached raw parquet exists."""
+    from data.fetcher import DataFetcher
+    from config.settings import CACHE_DIR
+    from unittest.mock import patch
+    
+    fetcher = DataFetcher()
+    # Mock universe
+    fetcher.universe = {"MOCK_TICKER": {"class": "Broad Market - Benchmark", "type": "PR", "inception": "2000-01-01"}}
+    
+    # Create cached DataFrame
+    dates = pd.date_range("2026-06-01", "2026-06-20", freq="D")
+    df_cached = pd.DataFrame({
+        "Open": [100.0] * len(dates),
+        "High": [101.0] * len(dates),
+        "Low": [99.0] * len(dates),
+        "Close": [100.0] * len(dates),
+        "Volume": [1000.0] * len(dates)
+    }, index=dates)
+    
+    cache_file = CACHE_DIR / "MOCK_TICKER_raw.parquet"
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    df_cached.to_parquet(cache_file)
+    
+    try:
+        # Scenario A: already up to date
+        with patch("yfinance.download") as mock_download:
+            res = fetcher.fetch_all(end_date="2026-06-20")
+            assert mock_download.call_count == 0, "Should not call yfinance if already up to date"
+            
+        # Scenario B: needs incremental fetch
+        # End date is 2026-06-25, so we expect start to be 2026-06-21
+        with patch("yfinance.download", return_value=pd.DataFrame()) as mock_download:
+            fetcher.fetch_all(end_date="2026-06-25")
+            mock_download.assert_called_once()
+            args, kwargs = mock_download.call_args
+            assert kwargs["start"] == "2026-06-21"
+            assert kwargs["end"] == "2026-06-25"
+            
+    finally:
+        # Cleanup
+        if cache_file.exists():
+            cache_file.unlink()
+
+
