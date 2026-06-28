@@ -3,7 +3,8 @@ import pandas as pd
 import numpy as np
 import vectorbt as vbt
 from core.indicators import MathEngine
-from core.state_math import calculate_z_score, calculate_bubble_z_score, classify_bubble_status
+from core.state_math import calculate_z_score, calculate_bubble_z_score, classify_bubble_status, calculate_ols_slope, classify_regime_2d
+from ui.views.signals import _evaluate_hysteresis_signal
 from config.settings import RISK_FREE_RATE
 
 def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
@@ -47,15 +48,47 @@ def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
     # Sharpe Ratio (using RISK_FREE_RATE from settings — India 10Y G-Sec proxy)
     sharpe = (latest_cagr - RISK_FREE_RATE) / latest_vol.replace(0, np.nan)
     
-    # Z-Score — use calculate_z_score (same function as Signals tab) for consistency
-    # Compute per-column on the rolling returns series, take the latest value
+    # Z-Score, Slope, Volatility & Regime — use same calculations as Signals tab for consistency
     latest_z = pd.Series(np.nan, index=master_matrix.columns)
+    latest_slope = pd.Series(0.0, index=master_matrix.columns)
+    latest_regime = pd.Series("Unknown", index=master_matrix.columns)
+    latest_pe_pct = pd.Series(np.nan, index=master_matrix.columns)
+    latest_data_gap = pd.Series(False, index=master_matrix.columns)
+    
     for col in returns_matrix.columns:
+        price_series = master_matrix[col].dropna()
         col_series = returns_matrix[col].dropna()
-        if len(col_series) >= 252:
+        total_history_days = len(price_series)
+        
+        if total_history_days >= 252:
             z_series = calculate_z_score(col_series, window=252)
             if len(z_series.dropna()) > 0:
                 latest_z[col] = z_series.iloc[-1]
+                
+            slope_series = calculate_ols_slope(col_series, window=10)
+            if len(slope_series.dropna()) > 0:
+                latest_slope[col] = slope_series.iloc[-1]
+                
+            daily_returns = price_series.pct_change().dropna()
+            vol_series = daily_returns.rolling(window=252).std() * np.sqrt(252)
+            regime_series = classify_regime_2d(vol_series, price_series, window=252)
+            if len(regime_series) > 0:
+                latest_regime[col] = regime_series.iloc[-1]
+                
+            if pe_matrix is not None and col in pe_matrix.columns:
+                ticker_pe = pe_matrix[col].dropna()
+                if not ticker_pe.empty:
+                    current_pe = ticker_pe.iloc[-1]
+                    if len(ticker_pe) > 1:
+                        latest_pe_pct[col] = (ticker_pe < current_pe).sum() / len(ticker_pe)
+                        
+            # Check C: Fat-Tail Outlier CAGR Cap
+            raw_cagr = latest_cagr[col]
+            if not pd.isna(raw_cagr) and raw_cagr > 1.50:
+                price_slice = price_series.tail(252)
+                missing_pct = price_slice.isna().sum() / 252
+                if missing_pct > 0.05:
+                    latest_data_gap[col] = True
     
     # 2. Build Screener Table (raw numeric values for correct sorting)
     screener_data = []
@@ -65,6 +98,7 @@ def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
         
         # Calculate Bubble Z-Score using lifetime history of the asset (with Check B: 1000 days history guard)
         price_series = master_matrix[ticker].dropna()
+        latest_bubble_z = np.nan
         if len(price_series) < 1000:
             bubble_class = {
                 "label": "🟡 Insufficient History"
@@ -120,8 +154,13 @@ def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
             "Bubble Risk": bubble_class["label"],
             "P/E Ratio (Est.)": latest_pe,
             "YoY EPS Growth (Est. %)": eps_growth,
+            "Regime": latest_regime[ticker],
             "_raw_cagr": raw_cagr,
-            "_raw_z": latest_z[ticker]
+            "_raw_z": latest_z[ticker],
+            "_raw_slope": latest_slope[ticker],
+            "_bubble_z": latest_bubble_z,
+            "_pe_percentile": latest_pe_pct[ticker],
+            "_is_data_gap": latest_data_gap[ticker]
         })
     
     df_screener = pd.DataFrame(screener_data)
@@ -130,30 +169,32 @@ def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
     df_screener['Segment Rank'] = df_screener.groupby('Segment')['_raw_cagr'].rank(pct=True)
     df_screener['Rank (%)'] = (df_screener['Segment Rank'] * 100).round(0)
     
-    # 4. Signal Badge Logic (Simplified for Screener)
+    # 4. Signal Badge Logic (Unified with Signals Tab Hysteresis Engine)
     def get_badge(row):
         ticker = row['Ticker']
         price_series = master_matrix[ticker].dropna()
         if len(price_series) < 252:
             return "🟡 Insufficient History"
             
-        # Check C: Fat-Tail Outlier CAGR Cap
-        cagr = row['_raw_cagr']
-        if pd.isna(cagr) or cagr > 1.50:
-            if not pd.isna(cagr) and cagr > 1.50:
-                price_slice = price_series.tail(252)
-                missing_pct = price_slice.isna().sum() / 252
-                if missing_pct > 0.05:
-                    return "🔴 High Uncertainty"
-                    
-        if row['_raw_z'] < -1.5: return "🔴 Reversal"
-        if row['_raw_z'] > 1.5: return "🟢 Momentum"
-        return "🟡 Neutral"
+        prev_state = st.session_state.get(f"signal_state_{ticker}", "Neutral")
+        signal_info = _evaluate_hysteresis_signal(
+            z_score=row['_raw_z'],
+            rank_pct=row['Segment Rank'],
+            slope=row['_raw_slope'],
+            regime=row['Regime'],
+            prev_state=prev_state,
+            bubble_z=row['_bubble_z'],
+            pe_percentile=row['_pe_percentile'],
+            is_data_gap=row['_is_data_gap']
+        )
+        # Sync state back to session state so tabs stay aligned
+        st.session_state[f"signal_state_{ticker}"] = signal_info["state"]
+        return signal_info["signal"]
     
     df_screener['Signal'] = df_screener.apply(get_badge, axis=1)
     
     # 5. Display Table with column formatting
-    cols_to_show = ["Ticker", "Name", "Segment", "3Y CAGR (%)", "3Y Vol (%)", "3Y Max DD (%)", "3Y Sharpe", "Z-Score", "Bubble Risk", "P/E Ratio (Est.)", "YoY EPS Growth (Est. %)", "Rank (%)", "Signal"]
+    cols_to_show = ["Ticker", "Name", "Segment", "3Y CAGR (%)", "3Y Vol (%)", "3Y Max DD (%)", "3Y Sharpe", "Z-Score", "Bubble Risk", "P/E Ratio (Est.)", "YoY EPS Growth (Est. %)", "Rank (%)", "Regime", "Signal"]
     
     st.markdown("## 📊 Global Market Opportunities")
     
@@ -192,6 +233,9 @@ def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
                 format="%.0f",
                 help="🏆 Percentile rank within the asset's segment. 90 = outperforming 90% of peers. 10 = underperforming. Based on current 3Y CAGR."
             ),
+            "Regime": st.column_config.TextColumn(
+                help="🌐 Market Volatility & Trend environment classification."
+            ),
             "Bubble Risk": st.column_config.TextColumn(
                 help="🫧 Bubble Risk level (lifetime 3Y detrended price distance Z-score):\n🟢 Normal = Z < 1.5\n🟡 Extended = 1.5 <= Z < 2.0\n🟠 2-Sigma Bubble = 2.0 <= Z < 3.0 (Outlier)\n🔴 3-Sigma Superbubble = Z >= 3.0 (Extreme)"
             ),
@@ -204,7 +248,7 @@ def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
                 help="📈 **Model-Estimated** Year-over-Year earnings-per-share growth. Derived from synthetic fundamental model, NOT from corporate filings. Treat as directional only."
             ),
             "Signal": st.column_config.TextColumn(
-                help="🚦 Regime-Aware Signal:\n🟢 Momentum = top performer with positive trend.\n🟡 Neutral = within normal historical bounds.\n🔴 Reversal = deeply discounted, potential mean-reversion candidate.\nSignals are simplified here; see the Signals tab for full regime-conditioned logic."
+                help="🚦 Regime-Aware Hysteresis-Stabilized Signal:\n🟢 Momentum = top performer with positive trend.\n🟡 Weak Momentum = de-escalated due to Volatility, Bubble, or Valuation risk.\n⚪ Neutral = within normal historical bounds.\n🔴 Reversal = deeply discounted, potential mean-reversion candidate.\n⛔ VETO = volatility breakdown regime, active momentum buys disabled."
             ),
         }
     )

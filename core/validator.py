@@ -1,6 +1,13 @@
 import pandas as pd
 import numpy as np
 import yfinance as yf
+# Clear yfinance singleton session cache to evict any stale standard requests session
+try:
+    from yfinance.data import YfData
+    YfData._instances.pop(YfData, None)
+except Exception:
+    pass
+
 import streamlit as st
 import logging
 

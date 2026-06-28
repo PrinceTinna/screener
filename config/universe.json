@@ -17,12 +17,6 @@
     "type": "TR",
     "inception": "2003-02-21"
   },
-  "MID150BEES.NS": {
-    "name": "Nippon India ETF Nifty Midcap 150",
-    "class": "Broad Market - Midcap",
-    "type": "TR",
-    "inception": "2019-01-31"
-  },
   "NIFTY_MIDCAP_100.NS": {
     "name": "Nifty Midcap 100 Index",
     "class": "Broad Market - Midcap",
@@ -45,7 +39,7 @@
     "name": "NIFTY IT Index",
     "class": "Sectoral - Benchmark",
     "type": "PR",
-    "inception": "1996-01-01"
+    "inception": "1996-01-03"
   },
   "^CNXPHARMA": {
     "name": "NIFTY Pharma Index",

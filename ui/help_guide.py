@@ -181,7 +181,7 @@ def render_help_guide():
 
         st.warning("""
         **Total Return (TR) vs. Price Return (PR) Mismatch:**
-        *   **Total Return (TR):** Captures both price change and reinvested dividends. Uses **Adjusted Close**. (e.g., `JUNIORBEES.NS`, `MID150BEES.NS`, `GOLDBEES.NS`).
+        *   **Total Return (TR):** Captures both price change and reinvested dividends. Uses **Adjusted Close**. (e.g., `JUNIORBEES.NS`, `GOLDBEES.NS`).
         *   **Price Return (PR):** Tracks index price changes only, ignoring dividends. Uses standard **Close**. (e.g., `^NSEI`, `^BSESN`, `^CNXIT`).
         
         *Over a 10-year horizon, dividends can contribute up to 30-40% of total wealth. Comparing a TR ETF against a PR Index creates a false alpha bias. The dashboard will display a warning banner if you mix asset types.*
@@ -189,7 +189,7 @@ def render_help_guide():
 
     with tab5:
         st.markdown("### 🗺️ Mapped Asset Universe Reference")
-        st.markdown("The dashboard tracks 21 core index benchmarks and trackers. Mapped by asset class:")
+        st.markdown("The dashboard tracks 20 core index benchmarks and trackers. Mapped by asset class:")
 
         st.markdown("""
         | Asset Class | Ticker Symbol | Name | Description |
@@ -197,7 +197,6 @@ def render_help_guide():
         | **Equity - Broad** | `^NSEI` | Nifty 50 Index | Benchmark broad index (Price Return) |
         | **Equity - Broad** | `^BSESN` | S&P BSE Sensex Index | Benchmark broad index (Price Return) |
         | **Equity - Broad** | `JUNIORBEES.NS` | Nippon India Nifty Next 50 ETF | Tracks Nifty Next 50 (Total Return) |
-        | **Equity - Broad** | `MID150BEES.NS` | Nippon India Nifty Midcap 150 ETF | Tracks Nifty Midcap 150 (Total Return) |
         | **Equity - Broad** | `NIFTY_MIDCAP_100.NS` | Nifty Midcap 100 Index | Benchmark mid-cap index (Price Return) |
         | **Equity - Broad** | `0P0001NJAX.BO` | ICICI Pru Nifty Smallcap 250 Index Fund | Tracks Nifty Smallcap 250 (Total Return) |
         | **Equity - Sector** | `^NSEBANK` | Nifty Bank Index | Banking sector index (Price Return) |

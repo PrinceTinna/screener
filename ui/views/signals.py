@@ -49,7 +49,8 @@ def _evaluate_hysteresis_signal(z_score: float, rank_pct: float, slope: float,
             "badge": "error",
             "confidence": "Data Integrity Failure",
             "detail": "Severe data gaps (missing price bars > 5%) combined with extreme CAGR outlier (>150%).",
-            "state": "High Uncertainty (Data Gap)"
+            "state": "High Uncertainty (Data Gap)",
+            "display_state": "High Uncertainty (Data Gap)"
         }
 
     is_extreme_breakdown = regime == "Extreme Breakdown"
@@ -63,7 +64,8 @@ def _evaluate_hysteresis_signal(z_score: float, rank_pct: float, slope: float,
             "badge": "error",
             "confidence": "Hard Veto Active",
             "detail": "Volatility exceeds 90th percentile. All momentum signals disabled.",
-            "state": "Veto"
+            "state": "Veto",
+            "display_state": "Veto (Volatility Breakdown)"
         }
 
     # ── Momentum Logic (with Hysteresis) ───────────────────────────────
@@ -79,18 +81,22 @@ def _evaluate_hysteresis_signal(z_score: float, rank_pct: float, slope: float,
             if is_overvalued:
                 label = "🟡 Weak Momentum (Overvaluation Risk)"
                 confidence = "Holding (Overvalued PE >= 90th percentile)"
+                display_state = "Weak Momentum (Valuation)"
             elif is_bubble:
                 label = "🟡 Weak Momentum (Bubble Risk)"
                 confidence = "Holding (Bubble Risk Active)"
+                display_state = "Weak Momentum (Bubble)"
             else:
                 label = "🟡 Weak Momentum (Whipsaw Risk)" if is_high_vol else "🟢 Momentum"
                 confidence = "Holding (Hysteresis)"
+                display_state = "Weak Momentum (Whipsaw)" if is_high_vol else "Momentum"
             return {
                 "signal": label,
                 "badge": badge,
                 "confidence": confidence,
                 "detail": f"Z={z_score:.2f}, Rank={rank_pct*100:.0f}th, Slope={slope:.4f}",
-                "state": "Momentum"
+                "state": "Momentum",
+                "display_state": display_state
             }
     else:
         # Not in momentum — use ENTRY thresholds (tighter)
@@ -102,18 +108,22 @@ def _evaluate_hysteresis_signal(z_score: float, rank_pct: float, slope: float,
             if is_overvalued:
                 label = "🟡 Weak Momentum (Overvaluation Risk)"
                 confidence = "New Entry (Overvalued PE >= 90th percentile)"
+                display_state = "Weak Momentum (Valuation)"
             elif is_bubble:
                 label = "🟡 Weak Momentum (Bubble Risk)"
                 confidence = "New Entry (Bubble Risk Active)"
+                display_state = "Weak Momentum (Bubble)"
             else:
                 label = "🟡 Weak Momentum (Whipsaw Risk)" if is_high_vol else "🟢 Momentum"
                 confidence = "New Entry"
+                display_state = "Weak Momentum (Whipsaw)" if is_high_vol else "Momentum"
             return {
                 "signal": label,
                 "badge": badge,
                 "confidence": confidence,
                 "detail": f"Z={z_score:.2f}, Rank={rank_pct*100:.0f}th, Slope={slope:.4f}",
-                "state": "Momentum"
+                "state": "Momentum",
+                "display_state": display_state
             }
 
     # ── Reversal Logic (Falling Knife Guard) ───────────────────────────
@@ -125,12 +135,14 @@ def _evaluate_hysteresis_signal(z_score: float, rank_pct: float, slope: float,
         else:
             badge = "success" if is_high_vol else "error"
             label = "🟢 Strong Reversal" if is_high_vol else "🔴 Reversal Zone"
+            display_state = "Strong Reversal" if is_high_vol else "Reversal Zone"
             return {
                 "signal": label,
                 "badge": badge,
                 "confidence": "Holding (Hysteresis)",
                 "detail": f"Z={z_score:.2f}, Rank={rank_pct*100:.0f}th, Slope={slope:.4f}",
-                "state": "Reversal"
+                "state": "Reversal",
+                "display_state": display_state
             }
     else:
         if (rank_pct < REVERSAL_ENTRY["rank_pct"]
@@ -138,12 +150,14 @@ def _evaluate_hysteresis_signal(z_score: float, rank_pct: float, slope: float,
                 and slope > 0):
             badge = "success" if is_high_vol else "error"
             label = "🟢 Strong Reversal" if is_high_vol else "🔴 Reversal Zone"
+            display_state = "Strong Reversal" if is_high_vol else "Reversal Zone"
             return {
                 "signal": label,
                 "badge": badge,
                 "confidence": "New Entry",
                 "detail": f"Z={z_score:.2f}, Rank={rank_pct*100:.0f}th, Slope={slope:.4f}",
-                "state": "Reversal"
+                "state": "Reversal",
+                "display_state": display_state
             }
 
     # ── Neutral / Underperforming ──────────────────────────────────────
@@ -152,7 +166,8 @@ def _evaluate_hysteresis_signal(z_score: float, rank_pct: float, slope: float,
         "badge": "info",
         "confidence": "No Signal",
         "detail": f"Z={z_score:.2f}, Rank={rank_pct*100:.0f}th, Slope={slope:.4f}",
-        "state": "Neutral"
+        "state": "Neutral",
+        "display_state": "Neutral"
     }
 
 
@@ -245,8 +260,16 @@ def render(master_matrix: pd.DataFrame, primary_ticker: str,
             if rolling_returns_matrix is not None and not rolling_returns_matrix.empty:
                 sync_returns = _apply_cross_sectional_sync_guard(rolling_returns_matrix.iloc[-1], rolling_returns_matrix.index[-1])
                 latest_returns = sync_returns.dropna()
-                current_return = latest_returns.get(primary_ticker, 0.0)
-                rank_pct = (latest_returns < current_return).sum() / max(len(latest_returns), 1)
+                if universe is not None:
+                    meta = universe.get(primary_ticker, {})
+                    segment = meta.get('class', 'Other').split(' - ')[0]
+                    segment_tickers = [tkr for tkr, m in universe.items() if m.get('class', 'Other').split(' - ')[0] == segment]
+                    segment_returns = latest_returns[latest_returns.index.isin(segment_tickers)]
+                    current_return = segment_returns.get(primary_ticker, 0.0)
+                    rank_pct = (segment_returns < current_return).sum() / max(len(segment_returns), 1)
+                else:
+                    current_return = latest_returns.get(primary_ticker, 0.0)
+                    rank_pct = (latest_returns < current_return).sum() / max(len(latest_returns), 1)
 
             # Get PE and calculate its historical percentile
             if pe_matrix is not None and primary_ticker in pe_matrix.columns:
@@ -320,11 +343,21 @@ def render(master_matrix: pd.DataFrame, primary_ticker: str,
     # Regime metrics
     r1, r2, r3, r4 = st.columns(4)
     r1.metric("Annualized Volatility", f"{current_vol*100:.1f}%")
-    r2.metric("OLS Slope (β)", f"{current_slope:.4f}")
+    r2.metric(
+        "OLS Slope (β)", 
+        f"{current_slope:.4f}",
+        help="📉 Short-Term Momentum Direction (10-day linear regression slope of returns). Positive values indicate short-term price recovery/momentum."
+    )
     trend_df = calculate_trend(price_series)
     trend_str = "Positive" if trend_df['is_positive_trend'].iloc[-1] else "Negative"
-    r3.metric("Trend (50>200 SMA)", trend_str)
-    r4.metric("Segment Rank", f"{rank_pct*100:.0f}th pctl")
+    r3.metric(
+        "Trend (50>200 SMA)", 
+        trend_str,
+        help="📈 Long-Term Trend (SMA Cross). Positive = 50 SMA is above 200 SMA (bullish crossover); Negative = bearish crossover."
+    )
+    rank_val = rank_pct * 100
+    rank_display = f"{rank_val:.0f}th pctl" if rank_val >= 5 else "<5th pctl"
+    r4.metric("Segment Rank", rank_display)
 
     with st.expander("ℹ️ Understanding the 2D Regime Model", expanded=False):
         st.markdown("""
@@ -401,7 +434,7 @@ def render(master_matrix: pd.DataFrame, primary_ticker: str,
     )
     s4.metric(
         "State Machine", 
-        signal["state"],
+        signal.get("display_state", signal["state"]),
         help="🔄 Core state tracking state (Momentum, Reversal, Neutral, Veto)."
     )
 

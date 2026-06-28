@@ -1,4 +1,11 @@
 import yfinance as yf
+# Clear yfinance singleton session cache to evict any stale standard requests session
+try:
+    from yfinance.data import YfData
+    YfData._instances.pop(YfData, None)
+except Exception:
+    pass
+
 import pandas as pd
 import numpy as np
 import json
@@ -18,13 +25,7 @@ class DataFetcher:
         with open(self.universe_path, 'r') as f:
             self.universe = json.load(f)
         
-        # Initialize a custom session with standard browser headers to bypass yfinance scraper blocks
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5"
-        })
+        # Delay imports if needed
             
     def _adjust_unadjusted_splits(self, df, ticker):
         """
@@ -60,7 +61,6 @@ class DataFetcher:
                 # This is NOT used for fundamentals (PE/EPS) — those use the tier system.
                 SPLIT_REFERENCE_MAP = {
                     "JUNIORBEES.NS": "^NSEI",
-                    "MID150BEES.NS": "^NSEI",
                     "0P0001NJAX.BO": "^NSEI",
                     "PSUBNKBEES.NS": "^NSEBANK",
                     "INFRABEES.NS": "^NSEI",
@@ -239,8 +239,7 @@ class DataFetcher:
                         ticker, 
                         start=start_date, 
                         end=end_date, 
-                        progress=False, 
-                        session=self.session
+                        progress=False
                     )
                     
                     if df_new.empty:

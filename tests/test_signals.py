@@ -314,3 +314,24 @@ class TestBubbleRiskDeescalation:
         assert "Data Integrity Failure" in signal["confidence"]
         assert "🔴 High Uncertainty" in signal["signal"]
 
+    def test_display_state_mapping(self):
+        """Verify that _evaluate_hysteresis_signal returns display_state mapping for UI representation."""
+        # 1. Bubble de-escalation
+        sig_bubble = _evaluate_hysteresis_signal(
+            z_score=2.0, rank_pct=0.85, slope=0.01, regime="Trending Bull", prev_state="Neutral", bubble_z=2.5
+        )
+        assert sig_bubble["display_state"] == "Weak Momentum (Bubble)"
+        
+        # 2. Overvaluation de-escalation
+        sig_val = _evaluate_hysteresis_signal(
+            z_score=2.0, rank_pct=0.85, slope=0.01, regime="Trending Bull", prev_state="Neutral", bubble_z=1.0, pe_percentile=0.95
+        )
+        assert sig_val["display_state"] == "Weak Momentum (Valuation)"
+        
+        # 3. Hard Veto
+        sig_veto = _evaluate_hysteresis_signal(
+            z_score=2.0, rank_pct=0.85, slope=0.01, regime="Extreme Breakdown", prev_state="Neutral"
+        )
+        assert sig_veto["display_state"] == "Veto (Volatility Breakdown)"
+
+

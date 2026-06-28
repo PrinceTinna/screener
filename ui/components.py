@@ -4,9 +4,13 @@ import pandas as pd
 
 def render_kpi_dashboard(asset_name: str, current_return: float, cagr: float, win_rate: float, rank: str, 
                          mean_ret: float, mean_cagr: float, p50: float, p30: float, 
-                         max_dd: float, worst_ret: float):
+                         max_dd: float, worst_ret: float, window_days: int = None):
     """Renders the top row of KPI cards and historical expectations."""
     st.markdown(f"### 📊 Insight: {asset_name}")
+    
+    is_1y = (window_days == 252)
+    cagr_help = "💡 Annualized CAGR is mathematically identical to simple return at a 1-year holding window." if is_1y else "Annualized Compound Annual Growth Rate."
+    mean_cagr_help = "💡 Mean Annualized CAGR is mathematically identical to rolling mean return at a 1-year holding window." if is_1y else "Annualized rolling mean return."
     
     # Row 1: Snapshot Metrics
     st.markdown("#### Real-Time Snapshot")
@@ -14,7 +18,7 @@ def render_kpi_dashboard(asset_name: str, current_return: float, cagr: float, wi
     with col1:
         st.metric(label="Current Return", value=f"{current_return*100:.2f}%")
     with col2:
-        st.metric(label="Annualized CAGR", value=f"{cagr*100:.2f}%")
+        st.metric(label="Annualized CAGR", value=f"{cagr*100:.2f}%", help=cagr_help)
     with col3:
         st.metric(label="Historical Win Rate", value=f"{win_rate*100:.1f}%")
     with col4:
@@ -26,7 +30,7 @@ def render_kpi_dashboard(asset_name: str, current_return: float, cagr: float, wi
     with e1:
         st.metric(label="Mean Rolling Return", value=f"{mean_ret*100:.2f}%")
     with e2:
-        st.metric(label="Mean Annualized CAGR", value=f"{mean_cagr*100:.2f}%")
+        st.metric(label="Mean Annualized CAGR", value=f"{mean_cagr*100:.2f}%", help=mean_cagr_help)
     with e3:
         st.metric(label="P50 (Median) Return", value=f"{p50*100:.2f}%")
     with e4:

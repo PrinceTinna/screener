@@ -352,7 +352,7 @@ class TestSignalStateMachineStability:
 
     def test_all_return_keys_present(self):
         """Every signal dict must have the required keys."""
-        required_keys = {"signal", "badge", "confidence", "detail", "state"}
+        required_keys = {"signal", "badge", "confidence", "detail", "state", "display_state"}
 
         combos = [
             (2.0, 0.95, 0.01, "Trending Bull", "Neutral"),

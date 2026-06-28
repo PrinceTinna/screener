@@ -194,6 +194,8 @@ def main():
     query_asset = st.query_params.get("asset")
     if query_asset in sorted_tickers:
         default_ticker_idx = sorted_tickers.index(query_asset)
+    elif "^NSEI" in sorted_tickers:
+        default_ticker_idx = sorted_tickers.index("^NSEI")
 
     primary_ticker = st.sidebar.selectbox(
         "Primary Asset Selector",

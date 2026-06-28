@@ -10,6 +10,7 @@ from ui.components import (
 )
 from config.settings import TRADING_DAYS_PER_YEAR
 from core.state_math import classify_regime_2d, calculate_bubble_z_score, classify_bubble_status, classify_bubble_series
+from core.validator import VAL_CROSS_CHECK_MAP
 
 @st.cache_data
 def _cached_vbt_stats(_daily_returns):
@@ -107,7 +108,8 @@ def render(master_matrix: pd.DataFrame, universe: dict, primary_ticker: str, ben
     # ── Row 1: KPIs ──────────────────────────────────────────
     render_kpi_dashboard(
         meta['name'], current_ret, current_cagr, win_rate, rank_str,
-        avg_ret, mean_cagr, p50_ret, p30_ret, max_dd, worst_ret
+        avg_ret, mean_cagr, p50_ret, p30_ret, max_dd, worst_ret,
+        window_days=window_days
     )
 
     # ── Bubble Risk Indicator strip ──────────────────────────
@@ -180,11 +182,16 @@ def render(master_matrix: pd.DataFrame, universe: dict, primary_ticker: str, ben
         if not pe_series.empty:
             st.markdown("---")
             st.markdown("### 📊 Valuation & Earnings Analysis")
-            st.warning(
-                "⚠️ **Data Disclaimer:** The P/E ratios and EPS values shown below are **model-estimated** "
-                "using historical PE benchmarks and price interpolation — they are NOT sourced from "
-                "live corporate filings. Treat as directional/approximate only."
-            )
+            if primary_ticker in VAL_CROSS_CHECK_MAP:
+                st.info(
+                    f"ℹ️ **Data Verification:** Model-estimated from historical benchmarks and verified/validated daily "
+                    f"against live ETF market references (reference: **{VAL_CROSS_CHECK_MAP[primary_ticker]}**)."
+                )
+            else:
+                st.warning(
+                    f"⚠️ **Data Disclaimer:** Purely model-estimated using historical index benchmarks. "
+                    f"No live ETF reference exists for validation (e.g. Nikkei 225). Treat as directional/approximate only."
+                )
             st.markdown("Long-term P/E ratio expansion/contraction mapped against corporate earnings momentum.")
             
             eps_series = eps_matrix[primary_ticker].dropna()
