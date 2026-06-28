@@ -193,6 +193,11 @@ To prevent latency bottlenecks during app-wide reruns when the user changes side
 
 ---
 
+## 8. Data Quality & Sanity Validation Specification
+Detailed specifications and guidelines on data freshness, split-adjustment verification gates, and signal sanity safeguards are documented in [Data Quality Specification](file:///Users/princetinna/Documents/quant_dashboard2/data_quality_spec.md).
+
+---
+
 ## 9. Changelog
 * v1.3.0: Initial phase 1.3 architecture definition.
 * v1.3.1: Complete instantiation of the Phase 1.3 Dashboard.
