@@ -163,8 +163,10 @@ def main():
     # ── Sidebar ─────────────────────────────────────────────────
     st.sidebar.header("Control Panel")
 
-    if st.sidebar.button("🧹 Clear Session Cache", help="Clears Streamlit's internal memory cache and refreshes the dashboard view. Does not fetch new market data."):
+    # Developer backdoor to clear memory cache without UI buttons (retained for developer use)
+    if st.query_params.get("clear_cache") == "true":
         st.cache_data.clear()
+        st.query_params.clear()
         st.rerun()
 
     # --- 1. Asset Class Filter ---
