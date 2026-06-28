@@ -12,8 +12,6 @@ def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
     """
     Renders the Cross-Sectional Discovery Matrix (Global Screener).
     """
-    st.markdown("## 🔍 Global Discovery Matrix")
-    st.markdown("Top-down cross-sectional screening across segments.")
 
     # 1. Calculation Layer
     # Use pre-computed engine and rolling returns if provided, else compute locally
@@ -157,7 +155,7 @@ def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
     # 5. Display Table with column formatting
     cols_to_show = ["Ticker", "Name", "Segment", "3Y CAGR (%)", "3Y Vol (%)", "3Y Max DD (%)", "3Y Sharpe", "Z-Score", "Bubble Risk", "P/E Ratio (Est.)", "YoY EPS Growth (Est. %)", "Rank (%)", "Signal"]
     
-    st.markdown("### 📊 Market Opportunities")
+    st.markdown("## 📊 Global Market Opportunities")
     
     st.dataframe(
         df_screener[cols_to_show],
