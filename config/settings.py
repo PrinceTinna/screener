@@ -16,5 +16,5 @@ TRADING_DAYS_PER_YEAR = 252
 FETCH_START_YEAR = 2001
 
 # UI Constants
-STREAMLIT_TITLE = "QuantPro Phase 1.6: Indian ETF/Index Station"
+STREAMLIT_TITLE = "QuantPro - Index Intelligence"
 STREAMLIT_LAYOUT = "wide"
