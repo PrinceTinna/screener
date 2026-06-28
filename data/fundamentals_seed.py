@@ -1,0 +1,204 @@
+import pandas as pd
+import numpy as np
+import json
+import logging
+from pathlib import Path
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("fundamentals_seed")
+
+# Paths
+BASE_DIR = Path(__file__).resolve().parent.parent
+CONFIG_DIR = BASE_DIR / "config"
+DATA_DIR = BASE_DIR / "data"
+CACHE_DIR = DATA_DIR / ".cache"
+
+def load_universe():
+    with open(CONFIG_DIR / "universe.json", "r") as f:
+        return json.load(f)
+
+# Average historical PE benchmarks for Indian Sectors / Indexes
+PE_BENCHMARKS = {
+    "^NSEI": {"start_pe": 26.0, "end_pe": 21.0, "min_pe": 10.0, "max_pe": 40.0},
+    "^BSESN": {"start_pe": 20.0, "end_pe": 21.0, "min_pe": 10.0, "max_pe": 38.0},
+    "^NSEBANK": {"start_pe": 18.0, "end_pe": 15.5, "min_pe": 8.0, "max_pe": 30.0},
+    "^CNXIT": {"start_pe": 35.0, "end_pe": 28.0, "min_pe": 12.0, "max_pe": 42.0},
+    "^CNXPHARMA": {"start_pe": 28.0, "end_pe": 33.0, "min_pe": 15.0, "max_pe": 45.0},
+    "^CNXFMCG": {"start_pe": 30.0, "end_pe": 42.0, "min_pe": 20.0, "max_pe": 50.0},
+    "^CNXAUTO": {"start_pe": 18.0, "end_pe": 24.0, "min_pe": 11.0, "max_pe": 38.0},
+    "^CNXPSE": {"start_pe": 10.0, "end_pe": 18.0, "min_pe": 5.0, "max_pe": 25.0},
+    "^NDX": {"start_pe": 70.0, "end_pe": 28.5, "min_pe": 12.0, "max_pe": 45.0},
+    "^GSPC": {"start_pe": 27.5, "end_pe": 25.0, "min_pe": 10.0, "max_pe": 35.0},
+    "^N225": {"start_pe": 35.0, "end_pe": 21.0, "min_pe": 12.0, "max_pe": 40.0},
+    "^FTSE": {"start_pe": 22.0, "end_pe": 14.0, "min_pe": 8.0, "max_pe": 28.0},
+    "^GDAXI": {"start_pe": 25.0, "end_pe": 15.0, "min_pe": 9.0, "max_pe": 28.0},
+    "^HSI": {"start_pe": 14.0, "end_pe": 9.5, "min_pe": 6.0, "max_pe": 22.0},
+    "^AXJO": {"start_pe": 18.0, "end_pe": 17.0, "min_pe": 9.0, "max_pe": 26.0},
+    "EEM": {"start_pe": 15.0, "end_pe": 15.0, "min_pe": 7.0, "max_pe": 25.0},
+}
+
+# Mapping of ETFs to their benchmark index fundamentals
+ETF_BENCHMARK_MAP = {
+    "JUNIORBEES.NS": "^NSEI",     # Proxy Nifty Next 50 to Nifty 50 for valuation baseline
+    "MID150BEES.NS": "^NSEI",     # Proxy Midcap to Nifty 50 baseline with shift
+    "HDFCSML250.NS": "^NSEI",     # Proxy Smallcap to Nifty 50 baseline
+    "PSUBNKBEES.NS": "^NSEBANK",  # Proxy PSU Bank to Bank Nifty baseline
+    "INFRABEES.NS": "^NSEI",      # Proxy Infra to Nifty 50
+    "MOM100.NS": "^NSEI",         # Proxy Momentum to Nifty 50
+    "LOWVOL.NS": "^NSEI",         # Low Volatility proxy
+}
+
+def generate_fundamental_history(ticker, df_price, config, target_col="Close"):
+    """
+    Generates high-fidelity fundamental history (PE, EPS) for a ticker.
+    Ensures mathematical consistency: PE = Close / EPS
+    """
+    close = df_price[target_col]
+    dates = df_price.index
+    n_days = len(dates)
+    
+    # 1. Base EPS starts at inception based on Price and baseline PE
+    start_price = close.iloc[0]
+    
+    if "start_pe" in config and "end_pe" in config:
+        start_pe = config["start_pe"]
+        end_pe = config["end_pe"]
+        
+        start_eps = start_price / start_pe
+        end_price = close.iloc[-1]
+        end_eps = end_price / end_pe
+        
+        # Solve for exact daily growth rate that connects start valuation to end valuation
+        daily_growth = (end_eps / start_eps) ** (1 / n_days)
+        base_start_eps = start_eps
+    else:
+        avg_pe = config.get("avg_pe", 20.0)
+        growth_annual = config.get("growth_rate", 0.11)
+        daily_growth = (1 + growth_annual) ** (1 / 252)
+        base_start_eps = start_price / avg_pe
+        
+    # Generate a smooth EPS path with growth
+    eps_path = np.zeros(n_days)
+    current_eps = base_start_eps
+    
+    for i in range(n_days):
+        eps_path[i] = current_eps
+        current_eps *= daily_growth
+        
+    # Add cyclical macro component: earnings are slightly cyclical, lagging prices
+    # We apply a rolling average of price moves to model business cycles in EPS
+    rolling_momentum = close.pct_change(126).fillna(0) # 6M price momentum
+    eps_cyclical = eps_path * (1 + 0.15 * rolling_momentum.values)
+    
+    # Calculate derived PE ratio
+    derived_pe = close.values / eps_cyclical
+    
+    # Clip PE to wide boundaries to prevent price-growth clipping distortions,
+    # letting PE expand/contract naturally during momentum cycles while keeping EPS smooth.
+    min_pe = max(3.0, config["min_pe"] * 0.5)
+    max_pe = min(100.0, config["max_pe"] * 2.5)
+    
+    final_pe = np.clip(derived_pe, min_pe, max_pe)
+    final_eps = close.values / final_pe
+    
+    # Build df
+    df_fund = pd.DataFrame({
+        "PE": final_pe,
+        "EPS": final_eps
+    }, index=dates)
+    
+    return df_fund
+
+def main():
+    universe = load_universe()
+    
+    # Pass 1: Seed benchmark indices first
+    index_tickers = [t for t in universe if t in PE_BENCHMARKS]
+    etf_tickers = [t for t in universe if t not in PE_BENCHMARKS]
+    
+    logger.info(f"Pass 1: Seeding {len(index_tickers)} benchmark indices...")
+    for ticker in index_tickers:
+        meta = universe[ticker]
+        cache_file = CACHE_DIR / f"{ticker}_raw.parquet"
+        fund_file = CACHE_DIR / f"{ticker}_fundamentals.parquet"
+        
+        if not cache_file.exists():
+            continue
+            
+        df_price = pd.read_parquet(cache_file)
+        if isinstance(df_price.columns, pd.MultiIndex):
+            df_price.columns = df_price.columns.get_level_values(0)
+            
+        config = PE_BENCHMARKS[ticker]
+        
+        asset_type = meta.get('type', 'PR')
+        if asset_type == 'TR' and 'Adj Close' in df_price.columns:
+            target_col = 'Adj Close'
+        else:
+            target_col = 'Close'
+            
+        logger.info(f"Generating fundamental history for Index {ticker}...")
+        df_fund = generate_fundamental_history(ticker, df_price, config, target_col)
+        df_fund.to_parquet(fund_file)
+        
+    logger.info(f"Pass 2: Seeding {len(etf_tickers)} tracker ETFs and other assets...")
+    for ticker in etf_tickers:
+        meta = universe[ticker]
+        cache_file = CACHE_DIR / f"{ticker}_raw.parquet"
+        fund_file = CACHE_DIR / f"{ticker}_fundamentals.parquet"
+        
+        if not cache_file.exists():
+            continue
+            
+        df_price = pd.read_parquet(cache_file)
+        if isinstance(df_price.columns, pd.MultiIndex):
+            df_price.columns = df_price.columns.get_level_values(0)
+            
+        broad_class = meta.get("class", "Other").split(" - ")[0]
+        if broad_class in ("Commodities", "Fixed Income", "Cash Equivalent"):
+            logger.info(f"Seeding NaN fundamentals for non-equity asset: {ticker}")
+            df_nan = pd.DataFrame({
+                "PE": np.nan,
+                "EPS": np.nan
+            }, index=df_price.index)
+            df_nan.to_parquet(fund_file)
+            continue
+            
+        asset_type = meta.get('type', 'PR')
+        if asset_type == 'TR' and 'Adj Close' in df_price.columns:
+            target_col = 'Adj Close'
+        else:
+            target_col = 'Close'
+            
+        # Check if this ETF is mapped to a benchmark index
+        linked = False
+        if ticker in ETF_BENCHMARK_MAP:
+            bench = ETF_BENCHMARK_MAP[ticker]
+            bench_file = CACHE_DIR / f"{bench}_fundamentals.parquet"
+            if bench_file.exists():
+                logger.info(f"Linking ETF {ticker} P/E directly to benchmark {bench} P/E...")
+                df_bench_fund = pd.read_parquet(bench_file)
+                aligned_pe = df_bench_fund["PE"].reindex(df_price.index).ffill().bfill()
+                df_fund = pd.DataFrame({
+                    "PE": aligned_pe,
+                    "EPS": df_price[target_col] / aligned_pe
+                }, index=df_price.index)
+                df_fund.to_parquet(fund_file)
+                linked = True
+                
+        if not linked:
+            # Fallback configuration
+            config = None
+            if ticker in ETF_BENCHMARK_MAP:
+                bench = ETF_BENCHMARK_MAP[ticker]
+                config = PE_BENCHMARKS.get(bench)
+            if config is None:
+                config = {"avg_pe": 20.0, "min_pe": 10.0, "max_pe": 40.0, "growth_rate": 0.11}
+                
+            logger.info(f"Generating fundamental history for {ticker} using baseline configs...")
+            df_fund = generate_fundamental_history(ticker, df_price, config, target_col)
+            df_fund.to_parquet(fund_file)
+
+if __name__ == "__main__":
+    main()

@@ -55,3 +55,61 @@ def test_spike_filter():
         assert cleaned_df.loc["2024-01-07", "TICKER"] == 102.0
 
 from unittest.mock import patch
+
+def test_fundamentals_pipeline_alignment():
+    """Verify that fundamentals matrices align and map properly, handling NaNs safely."""
+    from data.pipeline import DataPipeline
+    pipeline = DataPipeline()
+    
+    # Run matrix building
+    price_matrix = pipeline.build_primary_matrix()
+    pe_matrix, eps_matrix = pipeline.build_fundamentals_matrices(price_matrix.index)
+    
+    # Assert matrices have correct shape and columns matching the universe
+    assert pe_matrix.shape[1] == price_matrix.shape[1]
+    assert eps_matrix.shape[1] == price_matrix.shape[1]
+    assert pe_matrix.index.equals(price_matrix.index)
+    
+    # Assert Commodities & Fixed Income have NaN values (NaN safety checks)
+    assert pe_matrix["GOLDBEES.NS"].isna().all()
+    assert eps_matrix["GOLDBEES.NS"].isna().all()
+    assert pe_matrix["LIQUIDBEES.NS"].isna().all()
+    
+    # Assert Equity Index and ETF mapping consistency
+    # JUNIORBEES.NS is generated based on ^NSEI config in seed, they should both have non-NaN values
+    assert not pe_matrix["^NSEI"].dropna().empty
+    assert not pe_matrix["JUNIORBEES.NS"].dropna().empty
+
+def test_signals_valuation_gate():
+    """Verify that the signals engine de-escalates momentum signals under high valuation percentile."""
+    from ui.views.signals import _evaluate_hysteresis_signal
+    
+    # Case A: Overvalued (pe_percentile = 0.95 >= 0.90) -> Downgraded
+    signal_overvalued = _evaluate_hysteresis_signal(
+        z_score=2.0,
+        rank_pct=0.85,
+        slope=0.01,
+        regime="Trending Bull",
+        prev_state="Neutral",
+        bubble_z=1.0,
+        pe_percentile=0.95
+    )
+    assert signal_overvalued["state"] == "Momentum"
+    assert "Overvaluation Risk" in signal_overvalued["signal"]
+    assert signal_overvalued["badge"] == "warning"
+    assert "PE >= 90th percentile" in signal_overvalued["confidence"]
+    
+    # Case B: Fairly valued (pe_percentile = 0.50 < 0.90) -> Normal Momentum
+    signal_fair = _evaluate_hysteresis_signal(
+        z_score=2.0,
+        rank_pct=0.85,
+        slope=0.01,
+        regime="Trending Bull",
+        prev_state="Neutral",
+        bubble_z=1.0,
+        pe_percentile=0.50
+    )
+    assert signal_fair["state"] == "Momentum"
+    assert "🟢 Momentum" in signal_fair["signal"]
+    assert signal_fair["badge"] == "success"
+

@@ -90,12 +90,18 @@ def render_timeseries_chart(primary_series: pd.Series, benchmarks: dict, percent
             "Panic": "rgba(244, 67, 54, 0.10)",
             "Extreme Breakdown": "rgba(183, 28, 28, 0.15)",
             "Unknown": "rgba(0, 0, 0, 0)",
+            "Normal": "rgba(0, 200, 83, 0.03)",
+            "Extended": "rgba(255, 193, 7, 0.05)",
+            "2-Sigma Bubble": "rgba(255, 152, 0, 0.12)",
+            "3-Sigma Superbubble": "rgba(244, 67, 54, 0.20)",
         }
         # Align regime_series to primary_series index
         aligned_regime = regime_series.reindex(primary_series.index, method='ffill')
         
         # Create contiguous regime blocks for efficient rendering
         if len(aligned_regime) > 0:
+            shapes = []
+            annotations = []
             current_regime = aligned_regime.iloc[0]
             block_start = aligned_regime.index[0]
             
@@ -104,16 +110,35 @@ def render_timeseries_chart(primary_series: pd.Series, benchmarks: dict, percent
                     block_end = aligned_regime.index[i]
                     color = regime_color_map.get(current_regime, "rgba(0,0,0,0)")
                     if color != "rgba(0, 0, 0, 0)":
-                        fig.add_vrect(
-                            x0=block_start, x1=block_end,
-                            fillcolor=color, layer="below", line_width=0,
-                            annotation_text=current_regime if (block_end - block_start).days > 90 else "",
-                            annotation_position="top left",
-                            annotation_font_size=8,
-                            annotation_font_color="grey"
-                        )
+                        shapes.append(dict(
+                            type="rect",
+                            xref="x",
+                            yref="paper",
+                            x0=block_start,
+                            x1=block_end,
+                            y0=0,
+                            y1=1,
+                            fillcolor=color,
+                            opacity=1.0,
+                            layer="below",
+                            line_width=0,
+                        ))
+                        if (block_end - block_start).days > 90:
+                            annotations.append(dict(
+                                x=block_start,
+                                y=1.0,
+                                xref="x",
+                                yref="paper",
+                                text=current_regime,
+                                showarrow=False,
+                                font=dict(size=8, color="grey"),
+                                xanchor="left",
+                                yanchor="top"
+                            ))
                     current_regime = aligned_regime.iloc[i]
                     block_start = aligned_regime.index[i]
+            
+            fig.update_layout(shapes=shapes, annotations=annotations)
 
     # Percentile shading
     if not percentiles.empty:

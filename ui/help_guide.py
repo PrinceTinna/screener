@@ -264,12 +264,12 @@ def render_help_guide():
 
         | Type | Examples | Price Source | Includes Dividends? |
         |---|---|---|---|
-        | **Total Return (TR)** | NIFTYBEES.NS, BANKBEES.NS, GOLDBEES.NS | `Adj Close` | ✅ Yes |
+        | **Total Return (TR)** | JUNIORBEES.NS, MID150BEES.NS, GOLDBEES.NS | `Adj Close` | ✅ Yes |
         | **Price Return (PR)** | ^NSEI, ^BSESN, ^CNXIT | `Close` | ❌ No |
 
         #### Why this matters:
         Over a 20-year horizon, dividend reinvestment can account for **30–40% of total wealth** for \
-        a Nifty 50 ETF. If you compare `NIFTYBEES.NS` (TR) with `^NSEI` (PR) over 10 years, the ETF \
+        a Nifty ETF. If you compare `JUNIORBEES.NS` (TR) with `^NSEI` (PR) over 10 years, the ETF \
         will appear to outperform the index significantly — but this is NOT alpha. It is simply dividends.
 
         #### Rule of thumb:

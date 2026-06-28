@@ -11,7 +11,7 @@ import vectorbt as vbt
 # Fix relative imports when executing from root
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from config.settings import CONFIG_DIR, STREAMLIT_TITLE, STREAMLIT_LAYOUT, TRADING_DAYS_PER_YEAR
+from config.settings import CONFIG_DIR, STREAMLIT_TITLE, STREAMLIT_LAYOUT, TRADING_DAYS_PER_YEAR, CACHE_DIR
 from data.pipeline import DataPipeline
 from core.indicators import MathEngine
 from core.validators import validate_matrix_shape, validate_inception_alignment
@@ -30,8 +30,15 @@ def load_universe():
     with open(CONFIG_DIR / "universe.json", 'r') as f:
         return json.load(f)
 
+def get_cache_hash():
+    """Computes a lightweight hash based on modified times of cache parquet files."""
+    cache_files = sorted(list(CACHE_DIR.glob("*.parquet")))
+    mtimes = [str(f.stat().st_mtime) for f in cache_files]
+    import hashlib
+    return hashlib.md5("".join(mtimes).encode()).hexdigest()
+
 @st.cache_data
-def load_and_validate_matrix_v2():
+def load_and_validate_matrix_v2(cache_hash: str):
     pipeline = DataPipeline()
     matrix = pipeline.build_primary_matrix()
     uni = load_universe()
@@ -40,7 +47,13 @@ def load_and_validate_matrix_v2():
     return matrix
 
 @st.cache_data
-def compute_rolling_returns(_matrix, window_days: int):
+def load_fundamentals_matrices(_valid_index, cache_hash: str):
+    pipeline = DataPipeline()
+    pe_matrix, eps_matrix = pipeline.build_fundamentals_matrices(_valid_index)
+    return pe_matrix, eps_matrix
+
+@st.cache_data
+def compute_rolling_returns(_matrix, window_days: int, cache_hash: str):
     """Cached rolling returns computation — computed ONCE per window change."""
     engine = MathEngine(_matrix)
     return engine.calculate_rolling_returns(window_days)
@@ -48,14 +61,55 @@ def compute_rolling_returns(_matrix, window_days: int):
 def main():
     st.title("🛡️ " + STREAMLIT_TITLE)
 
+    cache_hash = get_cache_hash()
     universe = load_universe()
 
     try:
-        master_matrix = load_and_validate_matrix_v2()
+        master_matrix = load_and_validate_matrix_v2(cache_hash)
+        pe_matrix, eps_matrix = load_fundamentals_matrices(master_matrix.index, cache_hash)
     except Exception as e:
-        st.error(f"Failed to initialize Matrix Engine: {e}")
-        st.info("Have you fetched the initial data using data_fetcher.py?")
-        return
+        # Check if the cache directory is empty (which happens on first-time git clone/deploy)
+        cache_files = list(CACHE_DIR.glob("*.parquet"))
+        if not cache_files:
+            st.info("🔄 **First-time deployment detected:** Downloading and building local data cache. Please wait (takes ~30s)...")
+            try:
+                # Dynamically fetch the data
+                from data.fetcher import DataFetcher
+                fetcher = DataFetcher()
+                fetcher.fetch_all()
+                
+                # Seed the fundamentals
+                from data.fundamentals_seed import main as seed_main
+                seed_main()
+                
+                # Rerun to load the newly built caches
+                st.rerun()
+            except Exception as build_err:
+                st.error(f"Failed to auto-build data cache: {build_err}")
+                return
+        else:
+            st.error(f"Failed to initialize Matrix Engine: {e}")
+            st.info("Have you fetched the initial data using data_fetcher.py?")
+            return
+
+    # Dynamic Valuation Drift Alerts
+    from core.validator import run_valuation_cross_check
+    alerts = run_valuation_cross_check(pe_matrix, eps_matrix)
+    if alerts:
+        if "dismissed_alerts" not in st.session_state:
+            st.session_state["dismissed_alerts"] = set()
+            
+        for alert in alerts:
+            alert_key = f"alert_drift_{alert['ticker']}_{int(alert['sim_pe'])}"
+            if alert_key not in st.session_state["dismissed_alerts"]:
+                col_alert, col_btn = st.columns([0.94, 0.06])
+                with col_alert:
+                    st.warning(alert["message"])
+                with col_btn:
+                    # Renders a small cross button to close the notification
+                    if st.button("✕", key=alert_key, help="Dismiss alert"):
+                        st.session_state["dismissed_alerts"].add(alert_key)
+                        st.rerun()
 
     math_engine = MathEngine(master_matrix)
 
@@ -138,7 +192,7 @@ def main():
         pass
 
     # Calculate rolling returns matrix ONCE for all tabs (cached)
-    rolling_returns = compute_rolling_returns(master_matrix, window_days)
+    rolling_returns = compute_rolling_returns(master_matrix, window_days, cache_hash)
 
     # ── TAB 0: GLOBAL SCREENER ────────────────────────────────────
     with tab_screen:
@@ -148,7 +202,9 @@ def main():
             universe=universe,
             window_days=window_days,
             math_engine=math_engine,
-            rolling_returns=rolling_returns
+            rolling_returns=rolling_returns,
+            pe_matrix=pe_matrix,
+            eps_matrix=eps_matrix
         )
 
     # ── TAB 1: ASSET DASHBOARD ────────────────────────────────────
@@ -163,7 +219,9 @@ def main():
             window_days=window_days,
             window_label=window_label,
             lookback_range=lookback_range,
-            rolling_returns=rolling_returns
+            rolling_returns=rolling_returns,
+            pe_matrix=pe_matrix,
+            eps_matrix=eps_matrix
         )
 
     # ── TAB 2: SIGNALS (EXECUTION LAYER) ────────────────────────────
@@ -173,7 +231,9 @@ def main():
             master_matrix=master_matrix,
             primary_ticker=primary_ticker,
             rolling_returns_matrix=rolling_returns,
-            universe=universe
+            universe=universe,
+            pe_matrix=pe_matrix,
+            eps_matrix=eps_matrix
         )
 
     # ── TAB 3: HELP GUIDE ─────────────────────────────────────────

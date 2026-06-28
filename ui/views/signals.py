@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from core.state_math import calculate_z_score, calculate_trend, calculate_ols_slope, classify_regime_2d
+from core.state_math import calculate_z_score, calculate_trend, calculate_ols_slope, classify_regime_2d, calculate_bubble_z_score, classify_bubble_status
 from strategies.arbitration import ArbitrationEngine
 
 # ── Hysteresis Thresholds ────────────────────────────────────────────────
@@ -37,13 +37,15 @@ REGIME_STRATEGY = {
 
 
 def _evaluate_hysteresis_signal(z_score: float, rank_pct: float, slope: float,
-                                 regime: str, prev_state: str = "Neutral") -> dict:
+                                 regime: str, prev_state: str = "Neutral", bubble_z: float = 0.0,
+                                 pe_percentile: float = np.nan) -> dict:
     """
     State-machine logic for signal generation with Hysteresis.
     Uses different entry/exit thresholds to prevent flickering.
     """
     is_extreme_breakdown = regime == "Extreme Breakdown"
     is_high_vol = regime in ("Panic", "Recovery", "Extreme Breakdown")
+    is_overvalued = not pd.isna(pe_percentile) and pe_percentile >= 0.90
 
     # ── Hard Veto: Extreme Vol kills momentum entirely ─────────────────
     if is_extreme_breakdown:
@@ -63,12 +65,21 @@ def _evaluate_hysteresis_signal(z_score: float, rank_pct: float, slope: float,
         if rank_pct < MOMENTUM_EXIT["rank_pct"] or z_score < MOMENTUM_EXIT["z_score"]:
             pass  # Fall through to check other states
         else:
-            badge = "warning" if is_high_vol else "success"
-            label = "🟡 Weak Momentum (Whipsaw Risk)" if is_high_vol else "🟢 Momentum"
+            is_bubble = not pd.isna(bubble_z) and bubble_z >= 2.0
+            badge = "warning" if (is_high_vol or is_bubble or is_overvalued) else "success"
+            if is_overvalued:
+                label = "🟡 Weak Momentum (Overvaluation Risk)"
+                confidence = "Holding (Overvalued PE >= 90th percentile)"
+            elif is_bubble:
+                label = "🟡 Weak Momentum (Bubble Risk)"
+                confidence = "Holding (Bubble Risk Active)"
+            else:
+                label = "🟡 Weak Momentum (Whipsaw Risk)" if is_high_vol else "🟢 Momentum"
+                confidence = "Holding (Hysteresis)"
             return {
                 "signal": label,
                 "badge": badge,
-                "confidence": "Holding (Hysteresis)",
+                "confidence": confidence,
                 "detail": f"Z={z_score:.2f}, Rank={rank_pct*100:.0f}th, Slope={slope:.4f}",
                 "state": "Momentum"
             }
@@ -77,12 +88,21 @@ def _evaluate_hysteresis_signal(z_score: float, rank_pct: float, slope: float,
         if (rank_pct > MOMENTUM_ENTRY["rank_pct"]
                 and z_score > MOMENTUM_ENTRY["z_score"]
                 and slope >= 0):
-            badge = "warning" if is_high_vol else "success"
-            label = "🟡 Weak Momentum (Whipsaw Risk)" if is_high_vol else "🟢 Momentum"
+            is_bubble = not pd.isna(bubble_z) and bubble_z >= 2.0
+            badge = "warning" if (is_high_vol or is_bubble or is_overvalued) else "success"
+            if is_overvalued:
+                label = "🟡 Weak Momentum (Overvaluation Risk)"
+                confidence = "New Entry (Overvalued PE >= 90th percentile)"
+            elif is_bubble:
+                label = "🟡 Weak Momentum (Bubble Risk)"
+                confidence = "New Entry (Bubble Risk Active)"
+            else:
+                label = "🟡 Weak Momentum (Whipsaw Risk)" if is_high_vol else "🟢 Momentum"
+                confidence = "New Entry"
             return {
                 "signal": label,
                 "badge": badge,
-                "confidence": "New Entry",
+                "confidence": confidence,
                 "detail": f"Z={z_score:.2f}, Rank={rank_pct*100:.0f}th, Slope={slope:.4f}",
                 "state": "Momentum"
             }
@@ -128,12 +148,25 @@ def _evaluate_hysteresis_signal(z_score: float, rank_pct: float, slope: float,
 
 
 def render(master_matrix: pd.DataFrame, primary_ticker: str,
-           rolling_returns_matrix: pd.DataFrame = None, universe: dict = None):
+           rolling_returns_matrix: pd.DataFrame = None, universe: dict = None,
+           pe_matrix: pd.DataFrame = None, eps_matrix: pd.DataFrame = None):
     """
     Renders Tab 2: Signals (Execution Layer) with Regime-Aware Hysteresis.
     """
     st.markdown("## 🎯 Regime-Aware Signal Engine")
     st.markdown("Production-grade directives conditioned by volatility regime and trend direction.")
+
+    if universe is not None and primary_ticker in universe:
+        meta = universe[primary_ticker]
+        asset_class_badge = f"`{meta.get('class', 'Unknown')}`"
+        asset_type_label = "Total Return (ETF)" if meta.get('type') == 'TR' else "Price Return (Index)"
+        st.markdown(
+            f"**{primary_ticker}** &nbsp;|&nbsp; {meta['name']} &nbsp;|&nbsp; "
+            f"{asset_class_badge} &nbsp;|&nbsp; {asset_type_label} &nbsp;|&nbsp; "
+            f"Inception: `{meta.get('inception', 'Unknown')}`",
+            unsafe_allow_html=True
+        )
+        st.markdown("---")
 
     if primary_ticker not in master_matrix.columns:
         st.error("Primary ticker data not available.")
@@ -178,8 +211,23 @@ def render(master_matrix: pd.DataFrame, primary_ticker: str,
         else:
             rank_pct = 0.5  # Default to median if no cross-sectional data
 
+        # Get PE and calculate its historical percentile
+        current_pe = np.nan
+        pe_pct = np.nan
+        if pe_matrix is not None and primary_ticker in pe_matrix.columns:
+            ticker_pe = pe_matrix[primary_ticker].dropna()
+            if not ticker_pe.empty:
+                current_pe = ticker_pe.iloc[-1]
+                if len(ticker_pe) > 1:
+                    pe_pct = (ticker_pe < current_pe).sum() / len(ticker_pe)
+
         # Hysteresis: Retrieve previous state from session
         prev_state = st.session_state.get(f"signal_state_{primary_ticker}", "Neutral")
+
+        # Calculate Bubble Z-Score over lifetime
+        bubble_z_series = calculate_bubble_z_score(price_series)
+        current_bubble_z = bubble_z_series.iloc[-1] if not bubble_z_series.empty else np.nan
+        bubble_status = classify_bubble_status(current_bubble_z)
 
         # Evaluate signal
         signal = _evaluate_hysteresis_signal(
@@ -187,7 +235,9 @@ def render(master_matrix: pd.DataFrame, primary_ticker: str,
             rank_pct=rank_pct,
             slope=current_slope,
             regime=current_regime,
-            prev_state=prev_state
+            prev_state=prev_state,
+            bubble_z=current_bubble_z,
+            pe_percentile=pe_pct
         )
 
         # Persist state for hysteresis
@@ -244,15 +294,71 @@ def render(master_matrix: pd.DataFrame, primary_ticker: str,
     # ═══════════════════════════════════════════════════════════════════
     st.markdown("### 🔹 Signal Engine (Hysteresis-Stabilized)")
 
+    # Bubble Alert Banner
+    if not pd.isna(current_bubble_z) and current_bubble_z >= 2.0:
+        st.warning(
+            f"### ⚠️ Statistical Bubble Warning ({bubble_status['emoji']} {bubble_status['status']})\n\n"
+            f"The asset's Bubble Z-Score is **{current_bubble_z:.2f} σ**, indicating it is in extreme "
+            f"statistical outlier territory. Historically, while momentum can persist (the 'Bull Trap'), "
+            f"risk of severe drawdown is highly elevated. Systematic strategies suggest de-escalating exposure "
+            f"rather than attempting to time the peak."
+        )
+
+    # Valuation Alert Banner
+    if not pd.isna(pe_pct) and pe_pct >= 0.90:
+        st.warning(
+            f"### ⚠️ Valuation Warning (Top 10% PE Ratio)\n\n"
+            f"The asset's current P/E ratio of **{current_pe:.2f}** is in the **{pe_pct*100:.1f}th percentile** "
+            f"of its lifetime history. Investing in equity indices when valuations are in the top decile "
+            f"historically yields compressed forward returns and elevated drawdown risk. "
+            f"Allocations are de-escalated via the Valuation Gate."
+        )
+
     # Signal banner
     getattr(st, signal["badge"])(f"### {signal['signal']}")
 
-    s1, s2, s3 = st.columns(3)
-    s1.metric("Z-Score", f"{current_z:.2f} σ")
-    s2.metric("Confidence", signal["confidence"])
-    s3.metric("State Machine", signal["state"])
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric(
+        "Z-Score", 
+        f"{current_z:.2f} σ",
+        help="📏 Statistical deviation of rolling N-day return from its 1-year mean/std. Entry: >0.5, Exit: <0.0."
+    )
+    s2.metric(
+        "Bubble Z-Score", 
+        f"{current_bubble_z:.2f} σ" if not pd.isna(current_bubble_z) else "N/A",
+        help="🫧 Detrended price distance Z-score (3Y SMA baseline, lifetime history). Outlier: >=2.0, Superbubble: >=3.0."
+    )
+    s3.metric(
+        "Confidence", 
+        signal["confidence"],
+        help="⚖️ State Machine reasoning and de-escalation/veto indicators."
+    )
+    s4.metric(
+        "State Machine", 
+        signal["state"],
+        help="🔄 Core state tracking state (Momentum, Reversal, Neutral, Veto)."
+    )
 
     st.caption(f"**Signal Detail:** {signal['detail']}")
+
+    with st.expander("ℹ️ How today's signal was calculated (Formula & Rules)", expanded=False):
+        st.markdown(rf"""
+        Today's signal (`{signal['signal']}`) was generated by evaluating the following quantitative parameters:
+        
+        *   **Z-Score ({current_z:.2f} σ):** Standardized rolling return over the selected window. 
+            *   *Formula:* $(R_{{t, w}} - \mu(R)) / \sigma(R)$ computed over a rolling 252-day window.
+        *   **Segment Rank ({rank_pct*100:.0f}th percentile):** Cross-sectional performance ranking of the asset relative to peers in the same segment.
+            *   *Condition:* Momentum requires rank > 75th percentile (Entry) or > 60th percentile (Exit).
+        *   **OLS Slope ({current_slope:.4f}):** Noise-filtered trend directionality.
+            *   *Formula:* Linear regression slope of returns over the last 10 days. Momentum entry requires slope $\ge 0$.
+        *   **Market Volatility Regime ({current_regime}):** Under extreme volatility (>90th percentile of history), a hard veto blocks all Momentum signals.
+        *   **Bubble Z-Score ({current_bubble_z:.2f} σ):** Detrended price distance.
+            *   *Formula:* Price distance from its 3-year SMA, standardized over the asset's entire lifetime history. If $Z_{{bubble}} \ge 2.0$, momentum signals are downgraded.
+        *   **Valuation Gate (P/E Percentile: {pe_pct*100:.1f}th if applicable):** Historical P/E ratio position.
+            *   *Condition:* If current P/E is in the top 10% of history (percentile $\ge 90\%$), momentum signals are downgraded to Overvaluation Risk.
+        
+        **Current Execution State Machine:** `{signal['state']}`
+        """)
 
     with st.expander("ℹ️ How Hysteresis Prevents Flickering", expanded=False):
         st.markdown(f"""

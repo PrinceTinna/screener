@@ -140,6 +140,64 @@ class DataPipeline:
         
         return matrix
 
+    def load_cached_fundamentals(self):
+        """Loads all raw fundamentals parquets from the cache directory."""
+        all_fundamentals = {}
+        for ticker in self.universe.keys():
+            cache_file = CACHE_DIR / f"{ticker}_fundamentals.parquet"
+            if cache_file.exists():
+                all_fundamentals[ticker] = pd.read_parquet(cache_file)
+            else:
+                logger.warning(f"Missing fundamentals cache for {ticker}")
+        return all_fundamentals
+
+    def build_fundamentals_matrices(self, valid_index=None):
+        """
+        Builds PE and EPS master matrices, aligned with the price/returns index.
+        Applies inception date masking and forward fills transient NaN holes.
+        """
+        raw_fund_dict = self.load_cached_fundamentals()
+        
+        pe_dict = {}
+        eps_dict = {}
+        
+        for ticker in self.universe.keys():
+            if ticker not in raw_fund_dict:
+                continue
+                
+            df = raw_fund_dict[ticker].copy()
+            df.index = pd.to_datetime(df.index)
+            
+            # Uniqueness guard
+            df = df[~df.index.duplicated(keep='last')]
+            
+            pe_dict[ticker] = df["PE"]
+            eps_dict[ticker] = df["EPS"]
+            
+        pe_matrix = pd.DataFrame(pe_dict).sort_index()
+        eps_matrix = pd.DataFrame(eps_dict).sort_index()
+        
+        if valid_index is not None:
+            pe_matrix = pe_matrix.reindex(valid_index)
+            eps_matrix = eps_matrix.reindex(valid_index)
+            
+        # Inception masking
+        for ticker, metadata in self.universe.items():
+            inception_str = metadata.get('inception')
+            if inception_str:
+                inception_date = pd.to_datetime(inception_str)
+                if ticker in pe_matrix.columns:
+                    pe_matrix.loc[pe_matrix.index < inception_date, ticker] = np.nan
+                if ticker in eps_matrix.columns:
+                    eps_matrix.loc[eps_matrix.index < inception_date, ticker] = np.nan
+                    
+        # Forward fill transient missing data
+        # Note: Do NOT fill commodities or cash equivalents (they stay NaN)
+        pe_matrix = pe_matrix.ffill()
+        eps_matrix = eps_matrix.ffill()
+        
+        return pe_matrix, eps_matrix
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     pipeline = DataPipeline()

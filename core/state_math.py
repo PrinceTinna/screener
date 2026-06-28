@@ -32,7 +32,7 @@ def calculate_trend(series: pd.Series, fast: int = 50, slow: int = 200) -> pd.Da
         'is_positive_trend': is_positive_trend
     })
 
-@njit
+@njit(cache=True)
 def _ols_slope_numba(y):
     """
     Numba-optimized OLS slope calculation for a single window.
@@ -106,3 +106,89 @@ def classify_regime_2d(vol_series: pd.Series, price_series: pd.Series, window: i
     regimes = np.select(conditions, choices, default="Unknown")
     
     return pd.Series(regimes, index=vol_series.index)
+
+def calculate_bubble_z_score(price_series: pd.Series, trend_window: int = 756) -> pd.Series:
+    """
+    Calculates the detrended price distance Z-Score relative to its long-term baseline.
+    D_t = (Price_t - SMA_{t, 756}) / SMA_{t, 756}
+    Z_bubble_t = (D_t - mean_lifetime(D)) / std_lifetime(D)
+    """
+    if len(price_series) < trend_window:
+        return pd.Series(np.nan, index=price_series.index)
+    
+    # 1. Calculate long-term trend (e.g. 3Y SMA)
+    # Using min_periods=trend_window//2 to allow starting data calculation early but maintaining stability
+    sma = price_series.rolling(window=trend_window, min_periods=trend_window//2).mean()
+    
+    # 2. Distance from trend
+    distance = (price_series - sma) / sma
+    
+    # 3. Standardize using lifetime mean and standard deviation
+    mean_lifetime = distance.mean()
+    std_lifetime = distance.std()
+    
+    if pd.isna(std_lifetime) or std_lifetime == 0:
+        return pd.Series(np.nan, index=price_series.index)
+        
+    bubble_z = (distance - mean_lifetime) / std_lifetime
+    return bubble_z
+
+def classify_bubble_status(bubble_z: float) -> dict:
+    """
+    Classifies bubble status and returns label, badge style, emoji, and status string.
+    """
+    if pd.isna(bubble_z):
+        return {
+            "status": "Unknown",
+            "badge": "info",
+            "emoji": "⚪",
+            "label": "⚪ Unknown"
+        }
+    if bubble_z < 1.5:
+        return {
+            "status": "Normal",
+            "badge": "success",
+            "emoji": "🟢",
+            "label": "🟢 Normal"
+        }
+    if bubble_z < 2.0:
+        return {
+            "status": "Extended",
+            "badge": "warning",
+            "emoji": "🟡",
+            "label": "🟡 Extended"
+        }
+    if bubble_z < 3.0:
+        return {
+            "status": "2-Sigma Bubble",
+            "badge": "warning",
+            "emoji": "🟠",
+            "label": "🟠 2-Sigma Bubble"
+        }
+    return {
+        "status": "3-Sigma Superbubble",
+        "badge": "error",
+        "emoji": "🔴",
+        "label": "🔴 3-Sigma Superbubble"
+    }
+
+def classify_bubble_series(bubble_z_series: pd.Series) -> pd.Series:
+    """
+    Vectorized classification of bubble status for a series.
+    """
+    conditions = [
+        bubble_z_series.isna(),
+        bubble_z_series < 1.5,
+        (bubble_z_series >= 1.5) & (bubble_z_series < 2.0),
+        (bubble_z_series >= 2.0) & (bubble_z_series < 3.0),
+        bubble_z_series >= 3.0
+    ]
+    choices = [
+        "Unknown",
+        "Normal",
+        "Extended",
+        "2-Sigma Bubble",
+        "3-Sigma Superbubble"
+    ]
+    regimes = np.select(conditions, choices, default="Unknown")
+    return pd.Series(regimes, index=bubble_z_series.index)

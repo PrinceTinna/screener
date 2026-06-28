@@ -4,7 +4,7 @@ import vectorbt as vbt
 from numba import njit
 from config.settings import TRADING_DAYS_PER_YEAR
 
-@njit
+@njit(cache=True)
 def fast_percentiles_2d(matrix):
     """
     Computes cross-sectional (row-wise) percentiles across the 2D matrix.

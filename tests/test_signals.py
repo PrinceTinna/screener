@@ -218,3 +218,62 @@ class TestHardVetoExecution:
         last_regime = valid_regimes.iloc[-1] if len(valid_regimes) > 0 else "Unknown"
         assert last_regime in ("Extreme Breakdown", "Panic", "Recovery"), \
             f"Expected extreme regime at end, got: {last_regime}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Scenario 10: Bubble Risk De-escalation (Unit Test) [NEW]
+# Pass a synthetic parabolic price series where Z_bubble >= 2.0. Assert that
+# any active momentum signal is correctly downgraded to `🟡 Weak Momentum (Bubble Risk)`.
+# ═══════════════════════════════════════════════════════════════════════════════
+class TestBubbleRiskDeescalation:
+    
+    def test_momentum_downgraded_under_bubble_risk(self):
+        """Momentum signal should be downgraded to Weak Momentum (Bubble Risk) when bubble_z >= 2.0."""
+        signal = _evaluate_hysteresis_signal(
+            z_score=2.0,             # Strong momentum Z-score
+            rank_pct=0.85,           # Top performer
+            slope=0.01,              # Positive trend slope
+            regime="Trending Bull",
+            prev_state="Neutral",
+            bubble_z=2.5             # Extreme bubble
+        )
+        assert signal["state"] == "Momentum"
+        assert "Bubble Risk" in signal["signal"]
+        assert signal["badge"] == "warning"
+        
+    def test_momentum_normal_without_bubble_risk(self):
+        """Momentum signal should be Normal when bubble_z < 2.0."""
+        signal = _evaluate_hysteresis_signal(
+            z_score=2.0,             # Strong momentum Z-score
+            rank_pct=0.85,           # Top performer
+            slope=0.01,              # Positive trend slope
+            regime="Trending Bull",
+            prev_state="Neutral",
+            bubble_z=1.0             # Normal bubble Z
+        )
+        assert signal["state"] == "Momentum"
+        assert "🟢 Momentum" in signal["signal"]
+        assert signal["badge"] == "success"
+
+    def test_bubble_z_score_calculation(self):
+        """Verify that bubble Z-score correctly standardizes price distance from trend."""
+        from core.state_math import calculate_bubble_z_score, classify_bubble_status
+        
+        # Create a synthetic rising price series
+        prices = pd.Series([100.0 * (1.01 ** i) for i in range(1000)])
+        
+        bubble_z = calculate_bubble_z_score(prices, trend_window=100)
+        assert len(bubble_z) == 1000
+        
+        # Verify that standardized series has mean close to 0 and std close to 1
+        non_nan_z = bubble_z.dropna()
+        assert len(non_nan_z) > 0
+        assert abs(non_nan_z.mean()) < 0.1
+        assert abs(non_nan_z.std() - 1.0) < 0.1
+        
+        # Check classification labels
+        assert classify_bubble_status(0.5)["status"] == "Normal"
+        assert classify_bubble_status(1.8)["status"] == "Extended"
+        assert classify_bubble_status(2.5)["status"] == "2-Sigma Bubble"
+        assert classify_bubble_status(3.2)["status"] == "3-Sigma Superbubble"
+
