@@ -155,24 +155,52 @@ class DataFetcher:
         if end_date is None:
             end_date = datetime.today().strftime('%Y-%m-%d')
             
-        start_date = f"{FETCH_START_YEAR}-01-01"
         all_data = {}
         
         for ticker, metadata in self.universe.items():
             cache_file = CACHE_DIR / f"{ticker}_raw.parquet"
-            # In a real system, we'd check cache here, but for now we fetch to generate baseline
-            logger.info(f"Fetching {ticker} from {start_date} to {end_date}")
+            df_cached = None
+            start_date = f"{FETCH_START_YEAR}-01-01"
+            
+            if cache_file.exists():
+                try:
+                    df_cached = pd.read_parquet(cache_file)
+                    if not df_cached.empty:
+                        last_date = df_cached.index.max()
+                        # Start fetch 1 day after the last cached date
+                        start_date = (last_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+                except Exception as cache_err:
+                    logger.warning(f"Error reading raw cache for {ticker}, falling back to full fetch: {cache_err}")
+            
+            # If start_date >= end_date, we don't need to fetch
+            if pd.to_datetime(start_date) >= pd.to_datetime(end_date):
+                logger.info(f"Ticker {ticker} is already up to date (Last date: {start_date}). Skipping fetch.")
+                if df_cached is not None:
+                    all_data[ticker] = df_cached
+                continue
+                
+            logger.info(f"Fetching incremental data for {ticker} from {start_date} to {end_date}")
             
             try:
-                df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+                df_new = yf.download(ticker, start=start_date, end=end_date, progress=False)
                 
-                if df.empty:
-                    logger.warning(f"No data returned for {ticker}")
+                if df_new.empty:
+                    logger.warning(f"No new data returned for {ticker}")
+                    if df_cached is not None:
+                        all_data[ticker] = df_cached
                     continue
                 
                 # yFinance sometimes returns multi-index columns for single tickers in newer versions
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = df.columns.get_level_values(0)
+                if isinstance(df_new.columns, pd.MultiIndex):
+                    df_new.columns = df_new.columns.get_level_values(0)
+                
+                # Combine cached and new data
+                if df_cached is not None:
+                    df = pd.concat([df_cached, df_new])
+                else:
+                    df = df_new
+                    
+                df = df[~df.index.duplicated(keep='last')].sort_index()
                     
                 # Correct unadjusted splits in yfinance download stream
                 df = self._adjust_unadjusted_splits(df, ticker)
@@ -198,6 +226,8 @@ class DataFetcher:
                 
             except Exception as e:
                 logger.error(f"Error fetching {ticker}: {e}")
+                if df_cached is not None:
+                    all_data[ticker] = df_cached
                 
         return all_data
 

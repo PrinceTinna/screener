@@ -67,6 +67,31 @@ def main():
     try:
         master_matrix = load_and_validate_matrix_v2(cache_hash)
         pe_matrix, eps_matrix = load_fundamentals_matrices(master_matrix.index, cache_hash)
+        
+        # Check if we should trigger an auto-update of data (only once per session)
+        if "auto_updated_today" not in st.session_state:
+            st.session_state["auto_updated_today"] = True
+            latest_cached_date = master_matrix.index.max()
+            today = pd.Timestamp.now().normalize()
+            
+            # If the cached data is at least 1 day behind today, run incremental fetch
+            # We also check that today is not a weekend (Saturday=5, Sunday=6)
+            is_weekend = today.dayofweek in (5, 6)
+            
+            if (today - latest_cached_date).days >= 1 and not is_weekend:
+                with st.spinner("🔄 Fetching fresh incremental market data..."):
+                    try:
+                        from data.fetcher import DataFetcher
+                        fetcher = DataFetcher()
+                        fetcher.fetch_all()
+                        
+                        from data.fundamentals_seed import main as seed_main
+                        seed_main()
+                        
+                        # Rerun to pick up the updated Parquet files
+                        st.rerun()
+                    except Exception as update_err:
+                        logging.warning(f"Failed to auto-update incremental cache: {update_err}")
     except Exception as e:
         # Check if any active tickers in the universe are missing their raw cache files
         missing_cache = False
