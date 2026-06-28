@@ -256,7 +256,7 @@ class TestBubbleRiskDeescalation:
         assert signal["badge"] == "success"
 
     def test_bubble_z_score_calculation(self):
-        """Verify that bubble Z-score correctly standardizes price distance from trend."""
+        """Verify that bubble Z-score correctly standardizes price distance from trend using expanding window."""
         from core.state_math import calculate_bubble_z_score, classify_bubble_status
         
         # Create a synthetic rising price series
@@ -265,11 +265,17 @@ class TestBubbleRiskDeescalation:
         bubble_z = calculate_bubble_z_score(prices, trend_window=100)
         assert len(bubble_z) == 1000
         
-        # Verify that standardized series has mean close to 0 and std close to 1
+        # Verify that we get non-NaN values after the trend_window warmup
         non_nan_z = bubble_z.dropna()
         assert len(non_nan_z) > 0
-        assert abs(non_nan_z.mean()) < 0.1
-        assert abs(non_nan_z.std() - 1.0) < 0.1
+        
+        # With an expanding window (no look-ahead bias), the mean won't be exactly 0
+        # for an exponentially growing series — this is correct behavior.
+        # The key property is that the Z-scores are finite and bounded.
+        assert non_nan_z.abs().max() < 10, "Bubble Z-scores should be bounded"
+        
+        # Verify the series is not constant (expanding std produces variation)
+        assert non_nan_z.std() > 0.01, "Z-scores should have meaningful variation"
         
         # Check classification labels
         assert classify_bubble_status(0.5)["status"] == "Normal"

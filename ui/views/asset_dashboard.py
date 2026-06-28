@@ -182,6 +182,11 @@ def render(master_matrix: pd.DataFrame, universe: dict, primary_ticker: str, ben
         if not pe_series.empty:
             st.markdown("---")
             st.markdown("### 📊 Valuation & Earnings Analysis")
+            st.warning(
+                "⚠️ **Data Disclaimer:** The P/E ratios and EPS values shown below are **model-estimated** "
+                "using historical PE benchmarks and price interpolation — they are NOT sourced from "
+                "live corporate filings. Treat as directional/approximate only."
+            )
             st.markdown("Long-term P/E ratio expansion/contraction mapped against corporate earnings momentum.")
             
             eps_series = eps_matrix[primary_ticker].dropna()

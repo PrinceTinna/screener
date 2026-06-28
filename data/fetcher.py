@@ -55,8 +55,19 @@ class DataFetcher:
                 
                 # --- Gate A: Index-Reference Cross-Check ---
                 gate_a_passed = False
-                from core.validator import ETF_BENCHMARK_MAP
-                benchmark = ETF_BENCHMARK_MAP.get(ticker)
+                # Split reference map: maps ETFs to a related index for split detection ONLY.
+                # If the ETF drops 50% but the reference index didn't, it's likely a split.
+                # This is NOT used for fundamentals (PE/EPS) — those use the tier system.
+                SPLIT_REFERENCE_MAP = {
+                    "JUNIORBEES.NS": "^NSEI",
+                    "MID150BEES.NS": "^NSEI",
+                    "0P0001NJAX.BO": "^NSEI",
+                    "PSUBNKBEES.NS": "^NSEBANK",
+                    "INFRABEES.NS": "^NSEI",
+                    "MOM100.NS": "^NSEI",
+                    "LOWVOL.NS": "^NSEI",
+                }
+                benchmark = SPLIT_REFERENCE_MAP.get(ticker)
                 
                 if benchmark:
                     bench_file = CACHE_DIR / f"{benchmark}_raw.parquet"
@@ -307,12 +318,33 @@ class DataFetcher:
         # 2. Check if fundamentals file exists, else seed it
         if not fund_file.exists():
             # Delay import to prevent circular dependency
-            from data.fundamentals_seed import generate_fundamental_history, PE_BENCHMARKS, ETF_BENCHMARK_MAP
+            from data.fundamentals_seed import generate_fundamental_history, PE_BENCHMARKS, get_fundamental_tier
+            
+            # Classify asset into fundamental data confidence tier
+            tier = get_fundamental_tier(ticker, meta.get("class", "Other"))
+            
+            if tier == 3:
+                # Tier 3: No reliable fundamental source → write NaN parquet
+                # This covers ETFs (no exact-match benchmark), Smart Beta, etc.
+                logger.info(f"Tier 3 asset {ticker}: No fundamental data available, writing NaN")
+                df_nan = pd.DataFrame({
+                    "PE": np.nan,
+                    "EPS": np.nan
+                }, index=df_price.index)
+                fund_file.parent.mkdir(parents=True, exist_ok=True)
+                df_nan.to_parquet(fund_file)
+                return
+            
+            # Tier 1: Has own PE benchmark — generate model-estimated fundamentals
             config = PE_BENCHMARKS.get(ticker)
-            if config is None and ticker in ETF_BENCHMARK_MAP:
-                config = PE_BENCHMARKS.get(ETF_BENCHMARK_MAP[ticker])
             if config is None:
-                config = {"avg_pe": 20.0, "min_pe": 10.0, "max_pe": 40.0, "growth_rate": 0.11}
+                # Safety fallback — should not happen for Tier 1, but guard anyway
+                logger.warning(f"Tier 1 asset {ticker} missing PE_BENCHMARKS config, writing NaN")
+                df_nan = pd.DataFrame({"PE": np.nan, "EPS": np.nan}, index=df_price.index)
+                fund_file.parent.mkdir(parents=True, exist_ok=True)
+                df_nan.to_parquet(fund_file)
+                return
+                
             df_fund = generate_fundamental_history(ticker, df_price, config)
             fund_file.parent.mkdir(parents=True, exist_ok=True)
             df_fund.to_parquet(fund_file)

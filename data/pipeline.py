@@ -4,7 +4,7 @@ import json
 import logging
 import holidays
 from pathlib import Path
-from config.settings import CACHE_DIR, CONFIG_DIR
+from config.settings import CACHE_DIR, CONFIG_DIR, MAX_FFILL_DAYS
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +13,20 @@ class DataPipeline:
         self.universe_path = CONFIG_DIR / "universe.json"
         with open(self.universe_path, 'r') as f:
             self.universe = json.load(f)
-        self.in_calendar = holidays.India()
+
+    @staticmethod
+    def _get_holiday_calendar(calendar_code: str):
+        """Returns the appropriate holidays calendar for a given country code."""
+        calendar_map = {
+            "IN": holidays.India,
+            "US": holidays.UnitedStates,
+            "JP": holidays.Japan,
+            "UK": holidays.UnitedKingdom,
+            "DE": holidays.Germany,
+            "HK": holidays.HongKong,
+            "AU": holidays.Australia,
+        }
+        return calendar_map.get(calendar_code, holidays.India)()
 
     def load_cached_raw_data(self):
         """Loads all raw parquets from the cache directory."""
@@ -70,16 +83,29 @@ class DataPipeline:
 
         # Phase 1 guardrail: We keep NaNs up to the inception date of each asset,
         # but apply ffill() to handle intermittent missing data like a single missing Holi day.
-        # Strict alignment with a continuous business day calendar excluding holidays:
+        # Strict alignment with a continuous business day calendar excluding holidays.
+        # Use per-asset calendars from universe.json to correctly handle international assets.
         start_date = master_matrix.index.min()
         end_date = master_matrix.index.max()
         
         # Generate bdate_range
         all_bdays = pd.bdate_range(start=start_date, end=end_date)
         
-        # Filter out Indian holidays
-        valid_trading_days = [d for d in all_bdays if d not in self.in_calendar]
-        valid_trading_index = pd.DatetimeIndex(valid_trading_days)
+        # Collect distinct calendar codes from the universe
+        calendar_codes = set()
+        for meta in self.universe.values():
+            calendar_codes.add(meta.get('calendar', 'IN'))
+        
+        # Build the union of valid trading days across all calendars.
+        # A date is valid if it's a business day AND not a holiday in at least one market.
+        valid_trading_days = set()
+        for cal_code in calendar_codes:
+            cal = self._get_holiday_calendar(cal_code)
+            for d in all_bdays:
+                if d not in cal:
+                    valid_trading_days.add(d)
+        
+        valid_trading_index = pd.DatetimeIndex(sorted(valid_trading_days))
         
         # Reindex the master matrix to the valid trading calendar
         # This aligns the whole matrix to a singular robust timeline
@@ -121,11 +147,12 @@ class DataPipeline:
             deviation = (series / median_series) - 1
             spike_mask = deviation.abs() > threshold
             
-            # 3. Unadjusted Split Guard: If historical prices are significantly higher 
-            # than the latest price (e.g. > 5x), it's likely an unadjusted denomination change.
-            # This is specifically for cases like SETFGOLD.NS (1 gram vs 0.01 gram).
-            latest_price = series.dropna().iloc[-1]
-            split_mask = (series > latest_price * 5)
+            # 3. Unadjusted Split Guard: Compare against rolling median of last 252 days
+            # (not just the latest price) to avoid masking legitimately appreciated assets.
+            rolling_median_1y = series.rolling(window=252, min_periods=21).median()
+            split_mask = series > (rolling_median_1y * 5)
+            # Also guard: don't trigger split_mask where rolling_median_1y is NaN
+            split_mask = split_mask.fillna(False)
             
             final_mask = spike_mask | split_mask
             
@@ -135,20 +162,25 @@ class DataPipeline:
                 # Replace anomaly with NaN
                 matrix.loc[final_mask, ticker] = np.nan
         
-        # 4. Re-apply ffill to fill the newly created NaNs from the previous valid price
-        matrix = matrix.ffill()
+        # 4. Re-apply ffill with a cap to prevent stale prices from persisting
+        # If a gap exceeds MAX_FFILL_DAYS, leave as NaN rather than using stale data
+        matrix = matrix.ffill(limit=MAX_FFILL_DAYS)
         
         return matrix
 
     def load_cached_fundamentals(self):
-        """Loads all raw fundamentals parquets from the cache directory."""
+        """Loads all raw fundamentals parquets from the cache directory.
+        If a cache file is missing (e.g. Tier 3 ETFs before first fetch),
+        generates a NaN DataFrame so the matrix always has all columns."""
         all_fundamentals = {}
         for ticker in self.universe.keys():
             cache_file = CACHE_DIR / f"{ticker}_fundamentals.parquet"
             if cache_file.exists():
                 all_fundamentals[ticker] = pd.read_parquet(cache_file)
             else:
-                logger.warning(f"Missing fundamentals cache for {ticker}")
+                # Generate NaN fundamentals for missing tickers to keep matrices aligned
+                logger.info(f"No fundamentals cache for {ticker}, using NaN placeholder")
+                all_fundamentals[ticker] = pd.DataFrame({"PE": pd.Series(dtype=float), "EPS": pd.Series(dtype=float)})
         return all_fundamentals
 
     def build_fundamentals_matrices(self, valid_index=None):

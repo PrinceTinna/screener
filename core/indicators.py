@@ -47,9 +47,13 @@ class MathEngine:
     def calculate_cagr(self, rolling_returns: pd.DataFrame, window_days: int) -> pd.DataFrame:
         """
         Converts a rolling return matrix to an annualized CAGR matrix.
+        Guards against R < -1.0 which would produce NaN (negative base to fractional power).
         """
         years = window_days / TRADING_DAYS_PER_YEAR
-        return (1 + rolling_returns) ** (1 / years) - 1
+        # Clip to prevent (1 + R) from going negative — a return of -100% is the
+        # theoretical floor; anything below is bad data.
+        clipped = rolling_returns.clip(lower=-0.9999)
+        return (1 + clipped) ** (1 / years) - 1
 
     def get_cross_sectional_percentiles(self, metric_matrix: pd.DataFrame) -> pd.DataFrame:
         """

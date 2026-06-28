@@ -101,11 +101,18 @@ def run_pairs_backtest(close_a, close_b, sig_df, beta, open_a=None, open_b=None,
     short_entries = trade_signals['short_entries']
     short_exits = trade_signals['short_exits']
     
-    entries_df = pd.concat([short_entries, long_entries], axis=1, keys=['A', 'B'])
-    exits_df = pd.concat([short_exits, long_exits], axis=1, keys=['A', 'B'])
-    short_entries_df = pd.concat([long_entries, short_entries], axis=1, keys=['A', 'B'])
-    short_exits_df = pd.concat([long_exits, short_exits], axis=1, keys=['A', 'B'])
+    # Pairs trade mapping:
+    # On a "long" signal → Long asset B (undervalued) + Short asset A (overvalued)
+    # On a "short" signal → Short asset B + Long asset A (spread reversal)
+    # VBT's `entries` param = long entries, `short_entries` param = short entries
+    # So for Asset A: the "long entry" for A is actually the short signal (we short A when going long the pair)
+    #    and the "short entry" for A is the long signal (we long A when shorting the pair)
+    long_leg_entries = pd.concat([short_entries, long_entries], axis=1, keys=['A', 'B'])
+    long_leg_exits = pd.concat([short_exits, long_exits], axis=1, keys=['A', 'B'])
+    short_leg_entries = pd.concat([long_entries, short_entries], axis=1, keys=['A', 'B'])
+    short_leg_exits = pd.concat([long_exits, short_exits], axis=1, keys=['A', 'B'])
     
+    # Beta-weighted position sizing: allocate capital proportionally
     val_B = init_cash / (1 + beta)
     val_A = beta * val_B
     
@@ -114,10 +121,10 @@ def run_pairs_backtest(close_a, close_b, sig_df, beta, open_a=None, open_b=None,
     pf = vbt.Portfolio.from_signals(
         close=close_df,
         price=exec_price,
-        entries=entries_df,
-        exits=exits_df,
-        short_entries=short_entries_df,
-        short_exits=short_exits_df,
+        entries=long_leg_entries,
+        exits=long_leg_exits,
+        short_entries=short_leg_entries,
+        short_exits=short_leg_exits,
         size=size_df,
         size_type='Value',
         init_cash=init_cash,

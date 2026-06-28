@@ -37,7 +37,15 @@ class PriceMatchStrategy(BaseStrategy):
         }
 
     def run(self, data, params):
-        pass
+        """Run price match strategy using VBT indicator factory."""
+        merged_params = {**self.get_default_params(), **params}
+        result = PriceMatchVBT.run(
+            data,
+            lookback=merged_params["lookback"],
+            rolling_peak=merged_params["rolling_peak"],
+            tolerance=merged_params["tolerance"]
+        )
+        return {"entries": result.entries}
 
 PriceMatchVBT = vbt.IndicatorFactory(
     class_name="PriceMatch",

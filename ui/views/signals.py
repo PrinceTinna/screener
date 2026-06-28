@@ -407,6 +407,8 @@ def render(master_matrix: pd.DataFrame, primary_ticker: str,
         help="🔄 Core state tracking state (Momentum, Reversal, Neutral, Veto)."
     )
 
+    st.caption("⚠️ **Note:** Hysteresis state is stored in your browser session. It resets on page refresh or server restart — it does not persist across sessions.")
+
     st.caption(f"**Signal Detail:** {signal['detail']}")
 
     with st.expander("ℹ️ How today's signal was calculated (Formula & Rules)", expanded=False):
@@ -477,18 +479,65 @@ def render(master_matrix: pd.DataFrame, primary_ticker: str,
     )
     st.info(f"**Backtest Analysis:** {inversion_matrix['veto_printout']}")
 
-    with st.expander(f"View Historical Backtest Events ({inversion_matrix['events_found']} Found)", expanded=False):
-        if inversion_matrix['events_found'] > 0:
-            df_hist = inversion_matrix['history_table'].copy()
-            for col in ['Next 3M Return', 'Next 6M Return']:
-                if col in df_hist.columns:
-                    df_hist[col] = df_hist[col].apply(
-                        lambda x: f"{x*100:.2f}%" if pd.notnull(x) else "N/A")
-            if 'Max Drawdown (Next 1Y)' in df_hist.columns:
-                df_hist['Max Drawdown (Next 1Y)'] = df_hist['Max Drawdown (Next 1Y)'].apply(
-                    lambda x: f"{x*100:.2f}%" if pd.notnull(x) else "N/A")
-            if 'Z-Score' in df_hist.columns:
-                df_hist['Z-Score'] = df_hist['Z-Score'].apply(lambda x: f"{x:.2f}")
-            st.table(df_hist)
+    # ── Helpers (always in scope for both blocks) ───────────────────────
+    def fmt_pct(val):
+        try:
+            if val is None or (isinstance(val, float) and np.isnan(val)):
+                return "N/A"
+            return f"{float(val)*100:+.2f}%"
+        except Exception:
+            return "N/A"
+
+    def fmt_price(val):
+        try:
+            if val is None or (isinstance(val, float) and np.isnan(val)):
+                return "N/A"
+            return f"{float(val):,.2f}"
+        except Exception:
+            return "N/A"
+
+    def build_display_rows(df: pd.DataFrame) -> list:
+        rows = []
+        for start_date, row in df.iterrows():
+            rows.append({
+                "Start Date": start_date,
+                "Start Price": fmt_price(row.get("Start Price")),
+                "End Date (3M)": row.get("End Date (3M)", "N/A"),
+                "End Price (3M)": fmt_price(row.get("End Price (3M)")),
+                "3M Return": fmt_pct(row.get("Next 3M Return")),
+                "End Date (6M)": row.get("End Date (6M)", "N/A"),
+                "End Price (6M)": fmt_price(row.get("End Price (6M)")),
+                "6M Return": fmt_pct(row.get("Next 6M Return")),
+                "Max DD (1Y)": fmt_pct(row.get("Max Drawdown (Next 1Y)")),
+                "Z-Score": f"{float(row.get('Z-Score', 0)):.2f}",
+            })
+        return rows
+
+    # ── Recent 5 events with enriched inline data ────────────────────────
+    if inversion_matrix['events_found'] > 0:
+        df_hist = inversion_matrix['history_table'].copy()
+        display_rows = build_display_rows(df_hist)
+        if display_rows:
+            df_display = pd.DataFrame(display_rows)
+            st.caption("📌 **5 Most Recent Comparable Events** — showing entry date & price → exit date & price")
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
+        else:
+            st.warning("⚠️ Backtest events found but could not render price data — index format may be incompatible.")
+    else:
+        st.info("No comparable historical events found for the current threshold.")
+
+    # ── View ALL historic events ─────────────────────────────────────────
+    total_events = inversion_matrix['events_found']
+    with st.expander(
+        f"📂 View All Historic Backtest Events ({total_events} total)", expanded=False
+    ):
+        df_all = inversion_matrix.get('all_history_table', pd.DataFrame())
+        if not df_all.empty:
+            all_rows = build_display_rows(df_all)
+            df_all_df = pd.DataFrame(all_rows)
+            st.caption(f"Complete historical record of all {total_events} comparable signal events")
+            st.dataframe(df_all_df, use_container_width=True, hide_index=True)
         else:
             st.info("No comparable historical events found for the current threshold.")
+
+

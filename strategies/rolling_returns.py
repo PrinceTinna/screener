@@ -77,9 +77,28 @@ class RollingReturnsStrategy(BaseStrategy):
         }
 
     def run(self, data, params):
-        # Implementation using VectorBT logic
-        # We assume data has 'Price' and 'sma200'
-        pass
+        """
+        Run rolling returns mean-reversion strategy using VBT indicator factory.
+        Expects data dict with 'close' (price DataFrame) and 'sma200' (200-day SMA DataFrame).
+        """
+        merged_params = {**self.get_default_params(), **params}
+        close = data["close"] if isinstance(data, dict) else data
+        sma200 = data.get("sma200", close.rolling(200).mean()) if isinstance(data, dict) else close.rolling(200).mean()
+        
+        result = RollingReturnsVBT.run(
+            close, sma200,
+            window=merged_params["window"],
+            pct_window=merged_params["pct_window"],
+            entry_p=merged_params["entry_p"],
+            exit_p=merged_params["exit_p"],
+            max_value_trap_days=merged_params["max_value_trap_days"]
+        )
+        return {
+            "entries": result.entries,
+            "exits": result.exits,
+            "percentile": result.percentile,
+            "time_in_value": result.time_in_value,
+        }
 
 # Legacy VectorBT Indicator for backward compatibility if needed
 RollingReturnsVBT = vbt.IndicatorFactory(

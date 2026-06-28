@@ -117,6 +117,7 @@ class ArbitrationEngine:
                 "events_found": 0,
                 "false_positive_rate": 0.0,
                 "history_table": pd.DataFrame(),
+                "all_history_table": pd.DataFrame(),
                 "veto_printout": "No historical events matching this severity found (Insufficient Data)."
             }
             
@@ -128,39 +129,68 @@ class ArbitrationEngine:
         
         results = []
         for event_date in event_dates:
-            # We need future performance, so we must ensure we have data
-            idx_loc = self.price_series.index.get_loc(event_date)
-            
+            # get_loc() on a tz-aware DatetimeIndex can return a slice or
+            # boolean array instead of a plain int.  Normalise to int first.
+            raw_loc = self.price_series.index.get_loc(event_date)
+            if isinstance(raw_loc, slice):
+                idx_loc = raw_loc.start
+            elif isinstance(raw_loc, np.ndarray):
+                # boolean mask — take first True position
+                matches = np.where(raw_loc)[0]
+                if len(matches) == 0:
+                    continue
+                idx_loc = int(matches[0])
+            else:
+                idx_loc = int(raw_loc)
+
             # Approximate days: 3M ~ 63 days, 6M ~ 126 days, 1Y ~ 252 days
             try:
-                price_0 = self.price_series.iloc[idx_loc]
-                
-                # Check if we have enough future data
+                price_0 = float(self.price_series.iloc[idx_loc])
+
+                # 3M outcome
                 if idx_loc + 63 < len(self.price_series):
-                    ret_3m = (self.price_series.iloc[idx_loc + 63] / price_0) - 1
+                    price_3m = float(self.price_series.iloc[idx_loc + 63])
+                    end_date_3m = self.price_series.index[idx_loc + 63].strftime("%Y-%m-%d")
+                    ret_3m = (price_3m / price_0) - 1
                 else:
+                    price_3m = np.nan
+                    end_date_3m = "N/A"
                     ret_3m = np.nan
-                    
+
+                # 6M outcome
                 if idx_loc + 126 < len(self.price_series):
-                    ret_6m = (self.price_series.iloc[idx_loc + 126] / price_0) - 1
+                    price_6m = float(self.price_series.iloc[idx_loc + 126])
+                    end_date_6m = self.price_series.index[idx_loc + 126].strftime("%Y-%m-%d")
+                    ret_6m = (price_6m / price_0) - 1
                 else:
+                    price_6m = np.nan
+                    end_date_6m = "N/A"
                     ret_6m = np.nan
-                    
+
+                # 1Y max drawdown
                 if idx_loc + 252 < len(self.price_series):
-                    future_1y_prices = self.price_series.iloc[idx_loc:idx_loc+252]
-                    max_dd_1y = ((future_1y_prices - future_1y_prices.cummax()) / future_1y_prices.cummax()).min()
+                    future_1y_prices = self.price_series.iloc[idx_loc:idx_loc + 252]
+                    max_dd_1y = float(
+                        ((future_1y_prices - future_1y_prices.cummax()) / future_1y_prices.cummax()).min()
+                    )
                 else:
                     max_dd_1y = np.nan
-                    
+
                 results.append({
-                    "Date": event_date.strftime("%Y-%m-%d"),
-                    "Z-Score": self.z_score_series.loc[event_date],
+                    "Start Date": event_date.strftime("%Y-%m-%d"),
+                    "Start Price": round(price_0, 2),
+                    "Z-Score": float(self.z_score_series.loc[event_date]),
+                    "End Date (3M)": end_date_3m,
+                    "End Price (3M)": round(price_3m, 2) if not np.isnan(price_3m) else np.nan,
                     "Next 3M Return": ret_3m,
+                    "End Date (6M)": end_date_6m,
+                    "End Price (6M)": round(price_6m, 2) if not np.isnan(price_6m) else np.nan,
                     "Next 6M Return": ret_6m,
                     "Max Drawdown (Next 1Y)": max_dd_1y
                 })
             except Exception:
                 continue
+
 
         df_results = pd.DataFrame(results)
         
@@ -169,6 +199,7 @@ class ArbitrationEngine:
                 "events_found": 0,
                 "false_positive_rate": 0.0,
                 "history_table": pd.DataFrame(),
+                "all_history_table": pd.DataFrame(),
                 "veto_printout": "No historical events matching this severity found."
             }
             
@@ -189,6 +220,8 @@ class ArbitrationEngine:
         return {
             "events_found": len(df_results),
             "false_positive_rate": fpr,
-            "history_table": df_results.tail(5).set_index("Date"), # Show last 5 events
+            "history_table": df_results.tail(5).set_index("Start Date"),  # Show last 5 events
+            "all_history_table": df_results.set_index("Start Date"),      # All events for full view
             "veto_printout": printout
         }
+

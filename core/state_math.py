@@ -111,7 +111,10 @@ def calculate_bubble_z_score(price_series: pd.Series, trend_window: int = 756) -
     """
     Calculates the detrended price distance Z-Score relative to its long-term baseline.
     D_t = (Price_t - SMA_{t, 756}) / SMA_{t, 756}
-    Z_bubble_t = (D_t - mean_lifetime(D)) / std_lifetime(D)
+    Z_bubble_t = (D_t - expanding_mean(D)) / expanding_std(D)
+
+    Uses an expanding window (not lifetime) to avoid look-ahead bias.
+    Each day's Z-score only uses data available up to that point.
     """
     if len(price_series) < trend_window:
         return pd.Series(np.nan, index=price_series.index)
@@ -123,14 +126,14 @@ def calculate_bubble_z_score(price_series: pd.Series, trend_window: int = 756) -
     # 2. Distance from trend
     distance = (price_series - sma) / sma
     
-    # 3. Standardize using lifetime mean and standard deviation
-    mean_lifetime = distance.mean()
-    std_lifetime = distance.std()
+    # 3. Standardize using expanding mean and std (no look-ahead bias)
+    expanding_mean = distance.expanding(min_periods=trend_window).mean()
+    expanding_std = distance.expanding(min_periods=trend_window).std()
     
-    if pd.isna(std_lifetime) or std_lifetime == 0:
-        return pd.Series(np.nan, index=price_series.index)
+    # Avoid division by zero
+    expanding_std = expanding_std.replace(0, np.nan)
         
-    bubble_z = (distance - mean_lifetime) / std_lifetime
+    bubble_z = (distance - expanding_mean) / expanding_std
     return bubble_z
 
 def classify_bubble_status(bubble_z: float) -> dict:

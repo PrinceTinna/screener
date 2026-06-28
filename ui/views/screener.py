@@ -4,6 +4,7 @@ import numpy as np
 import vectorbt as vbt
 from core.indicators import MathEngine
 from core.state_math import calculate_z_score, calculate_bubble_z_score, classify_bubble_status
+from config.settings import RISK_FREE_RATE
 
 def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
            math_engine=None, rolling_returns: pd.DataFrame = None,
@@ -33,12 +34,11 @@ def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
     cagr_matrix = math_engine.calculate_cagr(returns_matrix, window_days)
     latest_cagr = cagr_matrix.iloc[-1]
     
-    # Volatility (Rolling Std * sqrt(252) for the latest row)
-    # We calculate realized volatility over the same window on the tail of the returns matrix.
-    # To match default min_periods=window_days, we set elements with insufficient data to NaN.
-    tail_returns = returns_matrix.tail(window_days)
-    latest_vol = tail_returns.std() * np.sqrt(252)
-    latest_vol[tail_returns.count() < window_days] = np.nan
+    # Volatility (Annualized from DAILY returns, not from rolling N-day returns)
+    daily_returns = master_matrix.pct_change()
+    tail_daily = daily_returns.tail(window_days)
+    latest_vol = tail_daily.std() * np.sqrt(252)
+    latest_vol[tail_daily.count() < window_days // 2] = np.nan
     
     # Max Drawdown (manual vectorized calculation)
     window_data = master_matrix.tail(window_days)
@@ -46,17 +46,18 @@ def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
     drawdown_matrix = (window_data - rolling_max) / rolling_max
     dd_matrix = drawdown_matrix.min()  # Worst drawdown per asset
     
-    # Sharpe Ratio (Using simplified 0% Rf for now or from config if available)
-    # RF is usually handled dynamically in pipeline, but here we can use a baseline
-    sharpe = latest_cagr / latest_vol.replace(0, np.nan)
+    # Sharpe Ratio (using RISK_FREE_RATE from settings — India 10Y G-Sec proxy)
+    sharpe = (latest_cagr - RISK_FREE_RATE) / latest_vol.replace(0, np.nan)
     
-    # Z-Score (vectorized across all columns at once for the latest row)
-    # Replaces the column-by-column .apply(calculate_z_score) loop.
-    # To match calculate_z_score's min_periods=window//2, we require at least window_days // 2 non-NaN elements.
-    latest_mean = tail_returns.mean()
-    latest_std = tail_returns.std().replace(0, np.nan)
-    latest_z = (returns_matrix.iloc[-1] - latest_mean) / latest_std
-    latest_z[tail_returns.count() < (window_days // 2)] = np.nan
+    # Z-Score — use calculate_z_score (same function as Signals tab) for consistency
+    # Compute per-column on the rolling returns series, take the latest value
+    latest_z = pd.Series(np.nan, index=master_matrix.columns)
+    for col in returns_matrix.columns:
+        col_series = returns_matrix[col].dropna()
+        if len(col_series) >= 252:
+            z_series = calculate_z_score(col_series, window=252)
+            if len(z_series.dropna()) > 0:
+                latest_z[col] = z_series.iloc[-1]
     
     # 2. Build Screener Table (raw numeric values for correct sorting)
     screener_data = []
@@ -119,8 +120,8 @@ def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
             "3Y Sharpe": sharpe[ticker],
             "Z-Score": latest_z[ticker],
             "Bubble Risk": bubble_class["label"],
-            "P/E Ratio": latest_pe,
-            "YoY EPS Growth (%)": eps_growth,
+            "P/E Ratio (Est.)": latest_pe,
+            "YoY EPS Growth (Est. %)": eps_growth,
             "_raw_cagr": raw_cagr,
             "_raw_z": latest_z[ticker]
         })
@@ -154,7 +155,7 @@ def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
     df_screener['Signal'] = df_screener.apply(get_badge, axis=1)
     
     # 5. Display Table with column formatting
-    cols_to_show = ["Ticker", "Name", "Segment", "3Y CAGR (%)", "3Y Vol (%)", "3Y Max DD (%)", "3Y Sharpe", "Z-Score", "Bubble Risk", "P/E Ratio", "YoY EPS Growth (%)", "Rank (%)", "Signal"]
+    cols_to_show = ["Ticker", "Name", "Segment", "3Y CAGR (%)", "3Y Vol (%)", "3Y Max DD (%)", "3Y Sharpe", "Z-Score", "Bubble Risk", "P/E Ratio (Est.)", "YoY EPS Growth (Est. %)", "Rank (%)", "Signal"]
     
     st.markdown("### 📊 Market Opportunities")
     
@@ -183,7 +184,7 @@ def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
             ),
             "3Y Sharpe": st.column_config.NumberColumn(
                 format="%.2f",
-                help="⚖️ Risk-Adjusted Return (Return ÷ Volatility). >1.0 = good, >2.0 = excellent. Compares return earned per unit of risk taken."
+                help=f"⚖️ Risk-Adjusted Return ((CAGR - Rf) ÷ Volatility). Rf = {RISK_FREE_RATE*100:.0f}% (India 10Y G-Sec). >1.0 = good, >2.0 = excellent."
             ),
             "Z-Score": st.column_config.NumberColumn(
                 format="%.2f",
@@ -196,13 +197,13 @@ def render(master_matrix: pd.DataFrame, universe: dict, window_days: int = 756,
             "Bubble Risk": st.column_config.TextColumn(
                 help="🫧 Bubble Risk level (lifetime 3Y detrended price distance Z-score):\n🟢 Normal = Z < 1.5\n🟡 Extended = 1.5 <= Z < 2.0\n🟠 2-Sigma Bubble = 2.0 <= Z < 3.0 (Outlier)\n🔴 3-Sigma Superbubble = Z >= 3.0 (Extreme)"
             ),
-            "P/E Ratio": st.column_config.NumberColumn(
+            "P/E Ratio (Est.)": st.column_config.NumberColumn(
                 format="%.2f",
-                help="🏷️ Price-to-Earnings Ratio. Measures how expensive the asset is relative to earnings. High = growth/expensive. Low = value/cheap. Under 15 is cheap for Indian indices. Commodities/Cash are NaN."
+                help="🏷️ **Model-Estimated** Price-to-Earnings Ratio (not from live filings). Derived from historical PE benchmarks and price interpolation. High = growth/expensive. Low = value/cheap. Commodities/Cash are NaN."
             ),
-            "YoY EPS Growth (%)": st.column_config.NumberColumn(
+            "YoY EPS Growth (Est. %)": st.column_config.NumberColumn(
                 format="%.2f%%",
-                help="📈 Year-over-Year corporate earnings-per-share growth. Measures direct fundamental earnings momentum. High positive growth (>10%) is strong."
+                help="📈 **Model-Estimated** Year-over-Year earnings-per-share growth. Derived from synthetic fundamental model, NOT from corporate filings. Treat as directional only."
             ),
             "Signal": st.column_config.TextColumn(
                 help="🚦 Regime-Aware Signal:\n🟢 Momentum = top performer with positive trend.\n🟡 Neutral = within normal historical bounds.\n🔴 Reversal = deeply discounted, potential mean-reversion candidate.\nSignals are simplified here; see the Signals tab for full regime-conditioned logic."

@@ -3,19 +3,15 @@ import pandas as pd
 import numpy as np
 import json
 import logging
-import sys
 import time
 from pathlib import Path
 import plotly.io as pio
 import vectorbt as vbt
 
-# Fix relative imports when executing from root
-sys.path.append(str(Path(__file__).resolve().parent.parent))
-
 from config.settings import CONFIG_DIR, STREAMLIT_TITLE, STREAMLIT_LAYOUT, TRADING_DAYS_PER_YEAR, CACHE_DIR
 from data.pipeline import DataPipeline
 from core.indicators import MathEngine
-from core.validators import validate_matrix_shape, validate_inception_alignment
+from core.validator import validate_matrix_shape, validate_inception_alignment
 from ui.components import (
     render_kpi_dashboard, 
     render_timeseries_chart, 

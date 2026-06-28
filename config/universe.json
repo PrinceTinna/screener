@@ -111,7 +111,8 @@
     "name": "NASDAQ 100 Index",
     "class": "International - Benchmark",
     "type": "PR",
-    "inception": "1985-10-01"
+    "inception": "1985-10-01",
+    "calendar": "US"
   },
   "LOWVOL.NS": {
     "name": "Mirae Asset Nifty 100 Low Volatility 30 ETF",
@@ -129,42 +130,49 @@
     "name": "S&P 500 Index",
     "class": "International - Benchmark",
     "type": "PR",
-    "inception": "1957-03-04"
+    "inception": "1957-03-04",
+    "calendar": "US"
   },
   "^N225": {
     "name": "Nikkei 225 Index",
     "class": "International - Benchmark",
     "type": "PR",
-    "inception": "1950-09-07"
+    "inception": "1950-09-07",
+    "calendar": "JP"
   },
   "^FTSE": {
     "name": "FTSE 100 Index",
     "class": "International - Benchmark",
     "type": "PR",
-    "inception": "1984-01-03"
+    "inception": "1984-01-03",
+    "calendar": "UK"
   },
   "^GDAXI": {
     "name": "DAX Performance Index",
     "class": "International - Benchmark",
     "type": "PR",
-    "inception": "1987-12-30"
+    "inception": "1987-12-30",
+    "calendar": "DE"
   },
   "^HSI": {
     "name": "Hang Seng Index",
     "class": "International - Benchmark",
     "type": "PR",
-    "inception": "1969-11-24"
+    "inception": "1969-11-24",
+    "calendar": "HK"
   },
   "^AXJO": {
     "name": "S&P/ASX 200 Index",
     "class": "International - Benchmark",
     "type": "PR",
-    "inception": "2000-03-31"
+    "inception": "2000-03-31",
+    "calendar": "AU"
   },
   "EEM": {
     "name": "iShares MSCI Emerging Markets ETF",
     "class": "International - Equity",
     "type": "TR",
-    "inception": "2003-04-07"
+    "inception": "2003-04-07",
+    "calendar": "US"
   }
 }

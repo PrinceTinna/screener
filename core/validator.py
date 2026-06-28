@@ -1,9 +1,44 @@
 import pandas as pd
+import numpy as np
 import yfinance as yf
 import streamlit as st
 import logging
 
 logger = logging.getLogger(__name__)
+
+# ── Matrix Validation (migrated from core/validators.py) ──────────────────────
+
+def validate_matrix_shape(matrix: pd.DataFrame, universe: dict) -> bool:
+    """
+    Ensures the matrix contains all expected assets from the universe.
+    """
+    expected_tickers = set(universe.keys())
+    actual_tickers = set(matrix.columns)
+    
+    missing = expected_tickers - actual_tickers
+    if missing:
+        raise ValueError(f"Matrix validation failed. Missing tickers: {missing}")
+    return True
+
+def validate_inception_alignment(matrix: pd.DataFrame, universe: dict):
+    """
+    Validates that no data structurally exists before the documented inception date.
+    (Prevents 'ghost returns' via backfilling errors).
+    """
+    for ticker, meta in universe.items():
+        if ticker in matrix.columns:
+            inception_str = meta.get('inception', None)
+            if inception_str:
+                inception_date = pd.to_datetime(inception_str)
+                # Check if there are non-NaN prices before inception date
+                pre_inception_mask = matrix.index < inception_date
+                pre_inception_data = matrix.loc[pre_inception_mask, ticker]
+                if not pre_inception_data.isna().all():
+                    raise ValueError(f"Ghost Data Error: {ticker} contains active price data before inception ({inception_date.date()})")
+    
+    return True
+
+# ── Valuation Cross-Check ─────────────────────────────────────────────────────
 
 # We map core simulated benchmark tickers to liquid ETFs that have yfinance P/Es
 VAL_CROSS_CHECK_MAP = {
@@ -14,16 +49,9 @@ VAL_CROSS_CHECK_MAP = {
     "EEM": "EEM"
 }
 
-# We map tracker ETFs to their corresponding underlying benchmark index
-ETF_BENCHMARK_MAP = {
-    "JUNIORBEES.NS": "^NSEI",
-    "MID150BEES.NS": "^NSEI",
-    "0P0001NJAX.BO": "^NSEI",
-    "PSUBNKBEES.NS": "^NSEBANK",
-    "INFRABEES.NS": "^NSEI",
-    "MOM100.NS": "^NSEI",
-    "LOWVOL.NS": "^NSEI"
-}
+# NOTE: ETF_BENCHMARK_MAP was removed. It previously mapped ETFs to proxy
+# indices for fundamental data, but all mappings were inaccurate proxies.
+# See data/fundamentals_seed.py for the get_fundamental_tier() system.
 
 @st.cache_data(ttl=86400)  # Cache yfinance lookups for 24 hours to prevent API throttling
 def fetch_live_etf_pes():
@@ -83,51 +111,11 @@ def run_valuation_cross_check(pe_matrix: pd.DataFrame, eps_matrix: pd.DataFrame,
                     )
                 })
                 
-    # Layer 2: Internal ETF-to-Benchmark index consistency check (PE & EPS Growth)
-    for etf_ticker, bench_ticker in ETF_BENCHMARK_MAP.items():
-        if etf_ticker in pe_matrix.columns and bench_ticker in pe_matrix.columns:
-            # P/E comparison
-            etf_pe = pe_matrix[etf_ticker].dropna().iloc[-1]
-            bench_pe = pe_matrix[bench_ticker].dropna().iloc[-1]
-            if not pd.isna(etf_pe) and not pd.isna(bench_pe) and etf_pe > 0 and bench_pe > 0:
-                pe_variance = abs(etf_pe - bench_pe) / bench_pe
-                if pe_variance > threshold:
-                    alerts.append({
-                        "ticker": etf_ticker,
-                        "sim_pe": etf_pe,
-                        "live_pe": bench_pe,
-                        "type": "PE_Internal",
-                        "message": (
-                            f"⚠️ **Valuation Inconsistency:** Simulated P/E for ETF **{etf_ticker}** ({etf_pe:.1f}x) "
-                            f"deviates from its underlying benchmark index **{bench_ticker}** ({bench_pe:.1f}x) by **{pe_variance*100:.1f}%**."
-                        )
-                    })
-                    
-        if eps_matrix is not None and etf_ticker in eps_matrix.columns and bench_ticker in eps_matrix.columns:
-            # YoY EPS growth comparison
-            etf_eps_series = eps_matrix[etf_ticker].dropna()
-            bench_eps_series = eps_matrix[bench_ticker].dropna()
-            
-            if len(etf_eps_series) >= 253 and len(bench_eps_series) >= 253:
-                etf_growth = (etf_eps_series.iloc[-1] / etf_eps_series.iloc[-252]) - 1.0
-                bench_growth = (bench_eps_series.iloc[-1] / bench_eps_series.iloc[-252]) - 1.0
-                
-                # Check for absolute variance difference
-                growth_variance = abs(etf_growth - bench_growth)
-                if growth_variance > threshold:
-                    note = ""
-                    if etf_ticker in ("MON100.NS", "QQQ", "MOM100.NS"):
-                        note = " (Note: This is common for international or momentum ETFs subject to SEBI/RBI investment limit restrictions or tracking error premium expansions on local exchanges)"
-                    
-                    alerts.append({
-                        "ticker": f"{etf_ticker}_EPS",
-                        "sim_pe": etf_growth * 100,
-                        "live_pe": bench_growth * 100,
-                        "type": "EPS_Internal",
-                        "message": (
-                            f"⚠️ **Earnings Growth Drift:** YoY EPS growth for ETF **{etf_ticker}** ({etf_growth*100:.1f}%) "
-                            f"deviates from its benchmark index **{bench_ticker}** ({bench_growth*100:.1f}%) by **{growth_variance*100:.1f} percentage points**{note}."
-                        )
-                    })
+    # Layer 2 was removed: Previously compared ETF fundamentals to their proxy
+    # benchmark (ETF_BENCHMARK_MAP), but all mappings were inaccurate proxies.
+    # ETFs now have NaN fundamentals (Tier 3), so this check is not applicable.
+    # When real fundamental data sources are integrated, add a new Layer 2
+    # that validates against live API data instead.
                     
     return alerts
+

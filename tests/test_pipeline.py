@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 import numpy as np
-from core.validators import validate_matrix_shape, validate_inception_alignment
+from core.validator import validate_matrix_shape, validate_inception_alignment
 
 def test_validate_inception_alignment():
     """Scenario 3: Indian Matrix Alignment (NaN backfill check)"""
@@ -75,10 +75,16 @@ def test_fundamentals_pipeline_alignment():
     assert eps_matrix["GOLDBEES.NS"].isna().all()
     assert pe_matrix["LIQUIDBEES.NS"].isna().all()
     
-    # Assert Equity Index and ETF mapping consistency
-    # JUNIORBEES.NS is generated based on ^NSEI config in seed, they should both have non-NaN values
-    assert not pe_matrix["^NSEI"].dropna().empty
-    assert not pe_matrix["JUNIORBEES.NS"].dropna().empty
+    # Assert Tier 1 indices (with own PE benchmarks) have non-NaN fundamental data
+    assert not pe_matrix["^NSEI"].dropna().empty, "Tier 1 index should have PE data"
+    assert not pe_matrix["^NSEBANK"].dropna().empty, "Tier 1 index should have PE data"
+    
+    # Assert Tier 3 ETFs (no exact-match benchmark) have NaN fundamentals
+    # This prevents fabricated data from proxy mappings (e.g. PSUBNKBEES→^NSEBANK)
+    if "JUNIORBEES.NS" in pe_matrix.columns:
+        assert pe_matrix["JUNIORBEES.NS"].isna().all(), "Tier 3 ETF should have NaN PE"
+    if "PSUBNKBEES.NS" in pe_matrix.columns:
+        assert pe_matrix["PSUBNKBEES.NS"].isna().all(), "Tier 3 ETF should have NaN PE"
 
 def test_signals_valuation_gate():
     """Verify that the signals engine de-escalates momentum signals under high valuation percentile."""
