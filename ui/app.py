@@ -4,9 +4,16 @@ import numpy as np
 import json
 import logging
 import time
+import sys
 from pathlib import Path
 import plotly.io as pio
 import vectorbt as vbt
+
+# Append the project root to sys.path so that local packages (config, data, core, strategies, ui) are discoverable
+# when running on Streamlit Cloud or within subdirectories.
+root_dir = str(Path(__file__).resolve().parent.parent)
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
 
 from config.settings import CONFIG_DIR, STREAMLIT_TITLE, STREAMLIT_LAYOUT, TRADING_DAYS_PER_YEAR, CACHE_DIR
 from data.pipeline import DataPipeline
