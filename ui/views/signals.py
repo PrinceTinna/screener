@@ -418,8 +418,11 @@ def render(master_matrix: pd.DataFrame, primary_ticker: str,
         *   **Segment Rank ({rank_pct*100:.0f}th percentile):** Cross-sectional performance ranking of the asset relative to peers in the same segment.
             *   *Condition:* Momentum requires rank > 75th percentile (Entry) or > 60th percentile (Exit).
         *   **OLS Slope ({current_slope:.4f}):** Noise-filtered trend directionality.
-            *   *Formula:* Linear regression slope of returns over the last 10 days. Momentum entry requires slope $\ge 0$.
-        *   **Market Volatility Regime ({current_regime}):** Under extreme volatility (>90th percentile of history), a hard veto blocks all Momentum signals.
+            *   *Formula:* Linear regression slope of returns over the last 10 days. Measures trend speed and prevents buying "falling knives" (slope must be positive for momentum/reversal entry).
+        *   **Market Volatility Regime ({current_regime}):** Vectorized classification using the **2D Regime Model** which categorizes the market using two dimensions:
+            *   *Volatility Dimension:* Realized daily price swings projected over a 252-day year relative to history.
+            *   *Trend Dimension:* Price position relative to the 252-day SMA.
+            *   *Hard Veto:* Under extreme volatility (>90th percentile of history), active momentum signals are disabled to prevent whipsaw losses.
         *   **Bubble Z-Score ({current_bubble_z:.2f} σ):** Detrended price distance.
             *   *Formula:* Price distance from its 3-year SMA, standardized over the asset's entire lifetime history. If $Z_{{bubble}} \ge 2.0$, momentum signals are downgraded.
         *   **Valuation Gate (P/E Percentile: {pe_pct*100:.1f}th if applicable):** Historical P/E ratio position.
