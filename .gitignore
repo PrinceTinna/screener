@@ -41,7 +41,7 @@ Thumbs.db
 *.swo
 
 # Quant Dashboard Specifics
-# Ignore downloaded/cached market data
-data/cache/
-*.parquet
+# Commit pre-seeded market data cache to git to avoid Rate Limit errors on Streamlit Cloud
+!data/cache/
+!data/cache/*.parquet
 *.csv
