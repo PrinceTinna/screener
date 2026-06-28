@@ -371,6 +371,17 @@ def render(master_matrix: pd.DataFrame, primary_ticker: str,
             f"Allocations are de-escalated via the Valuation Gate."
         )
 
+    # Veto Explain Callout
+    if signal["state"] == "Veto":
+        st.error(
+            f"### ⛔ Hard Veto Active\n\n"
+            f"**What this means:** Volatility is in the **top 10% of its historical baseline** (Annualized Volatility: **{current_vol*100:.1f}%**). "
+            f"During extreme market stress, active momentum and trend indicators have low signal-to-noise ratios and are prone to whipsaw losses.\n\n"
+            f"**Actionable Guidance:**\n"
+            f"*   **Active Trading:** All active tactical momentum buys are temporarily suspended/disabled.\n"
+            f"*   **Passive DCA / SIP:** Do **NOT** stop your systematic monthly SIP. Passive cost-averaging is mathematically designed to acquire units at lower prices. Keep standard allocations active."
+        )
+
     # Signal banner
     getattr(st, signal["badge"])(f"### {signal['signal']}")
 
@@ -454,12 +465,16 @@ def render(master_matrix: pd.DataFrame, primary_ticker: str,
     st.divider()
 
     # ═══════════════════════════════════════════════════════════════════
-    # SECTION D: INVERSION TRANSPARENCY MATRIX
+    # SECTION D: EMPIRICAL BACKTEST PROBABILITIES
     # ═══════════════════════════════════════════════════════════════════
-    st.markdown("### 🔹 Inversion Transparency Matrix")
-    st.info(f"**Veto Analysis:** {inversion_matrix['veto_printout']}")
+    st.markdown("### 📊 Empirical Backtest Probabilities")
+    st.markdown(
+        "*This panel scans the historical dataset to find all past instances where the asset experienced a similar signal state. "
+        "It calculates the performance outcomes over the subsequent 3, 6, and 12 months to verify the historical reliability of today's signal.*"
+    )
+    st.info(f"**Backtest Analysis:** {inversion_matrix['veto_printout']}")
 
-    with st.expander(f"View Historical Events ({inversion_matrix['events_found']} Found)", expanded=False):
+    with st.expander(f"View Historical Backtest Events ({inversion_matrix['events_found']} Found)", expanded=False):
         if inversion_matrix['events_found'] > 0:
             df_hist = inversion_matrix['history_table'].copy()
             for col in ['Next 3M Return', 'Next 6M Return']:
