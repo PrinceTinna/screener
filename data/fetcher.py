@@ -188,6 +188,7 @@ class DataFetcher:
                 df = df[[c for c in cols_to_keep if c in df.columns]]
                 
                 # Save purely raw data to cache
+                cache_file.parent.mkdir(parents=True, exist_ok=True)
                 df.to_parquet(cache_file)
                 
                 # --- Sync fundamentals ---
@@ -215,6 +216,7 @@ class DataFetcher:
                 "PE": np.nan,
                 "EPS": np.nan
             }, index=df_price.index)
+            fund_file.parent.mkdir(parents=True, exist_ok=True)
             df_nan.to_parquet(fund_file)
             return
 
@@ -228,6 +230,7 @@ class DataFetcher:
             if config is None:
                 config = {"avg_pe": 20.0, "min_pe": 10.0, "max_pe": 40.0, "growth_rate": 0.11}
             df_fund = generate_fundamental_history(ticker, df_price, config)
+            fund_file.parent.mkdir(parents=True, exist_ok=True)
             df_fund.to_parquet(fund_file)
             return
             
@@ -283,6 +286,7 @@ class DataFetcher:
             df_new = pd.DataFrame(new_records).set_index("Date")
             df_fund = pd.concat([df_fund, df_new])
             df_fund = df_fund[~df_fund.index.duplicated(keep="last")].sort_index()
+            fund_file.parent.mkdir(parents=True, exist_ok=True)
             df_fund.to_parquet(fund_file)
 
 if __name__ == "__main__":

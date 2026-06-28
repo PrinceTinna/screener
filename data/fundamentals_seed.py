@@ -140,6 +140,7 @@ def main():
             
         logger.info(f"Generating fundamental history for Index {ticker}...")
         df_fund = generate_fundamental_history(ticker, df_price, config, target_col)
+        fund_file.parent.mkdir(parents=True, exist_ok=True)
         df_fund.to_parquet(fund_file)
         
     logger.info(f"Pass 2: Seeding {len(etf_tickers)} tracker ETFs and other assets...")
@@ -162,6 +163,7 @@ def main():
                 "PE": np.nan,
                 "EPS": np.nan
             }, index=df_price.index)
+            fund_file.parent.mkdir(parents=True, exist_ok=True)
             df_nan.to_parquet(fund_file)
             continue
             
@@ -184,6 +186,7 @@ def main():
                     "PE": aligned_pe,
                     "EPS": df_price[target_col] / aligned_pe
                 }, index=df_price.index)
+                fund_file.parent.mkdir(parents=True, exist_ok=True)
                 df_fund.to_parquet(fund_file)
                 linked = True
                 
@@ -198,6 +201,7 @@ def main():
                 
             logger.info(f"Generating fundamental history for {ticker} using baseline configs...")
             df_fund = generate_fundamental_history(ticker, df_price, config, target_col)
+            fund_file.parent.mkdir(parents=True, exist_ok=True)
             df_fund.to_parquet(fund_file)
 
 if __name__ == "__main__":

@@ -43,7 +43,7 @@ The system strictly parses a pre-defined JSON registry to route API calls (Adj C
 ```text
 ├── config/               
 │   ├── settings.py       # Global constants (Trading days = 252)
-│   └── universe.json     # The strict Indian ETF/Index registry
+│   └── universe.json     # The ETF/Index registry
 │
 ├── data/                 
 │   ├── fetcher.py        # yfinance logic (.NS/.BO suffix handling) + daily incremental fundamentals update
