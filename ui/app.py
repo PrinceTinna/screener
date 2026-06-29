@@ -56,6 +56,27 @@ def load_fundamentals_matrices(_valid_index, cache_hash: str):
     pe_matrix, eps_matrix = pipeline.build_fundamentals_matrices(_valid_index)
     return pe_matrix, eps_matrix
 
+import threading
+
+# Global lock and status tracker for background data fetching across user sessions
+_update_lock = threading.Lock()
+_is_updating = False
+
+def run_background_update():
+    global _is_updating
+    try:
+        from data.fetcher import DataFetcher
+        fetcher = DataFetcher()
+        fetcher.fetch_all()
+        
+        from data.fundamentals_seed import main as seed_main
+        seed_main()
+    except Exception as err:
+        logging.error(f"Background update failed: {err}")
+    finally:
+        with _update_lock:
+            _is_updating = False
+
 @st.cache_data
 def compute_rolling_returns(_matrix, window_days: int, cache_hash: str):
     """Cached rolling returns computation — computed ONCE per window change."""
@@ -67,6 +88,13 @@ def main():
 
     cache_hash = get_cache_hash()
     universe = load_universe()
+
+    # Show update banner if a background update is in progress
+    global _is_updating
+    with _update_lock:
+        updating_now = _is_updating
+    if updating_now:
+        st.info("🔄 **Update in progress:** Fresh market data is being fetched in the background. Interact with the app or refresh later to load it.")
 
     try:
         master_matrix = load_and_validate_matrix_v2(cache_hash)
@@ -82,8 +110,8 @@ def main():
             
             if ref_cache_file.exists():
                 last_modified_time = ref_cache_file.stat().st_mtime
-                # If modified less than 4 hours ago (14400s), skip globally to prevent race conditions
-                if time.time() - last_modified_time < 14400:
+                # If modified less than 8 hours ago (28800s), skip globally
+                if time.time() - last_modified_time < 28800:
                     should_fetch = False
             
             if should_fetch:
@@ -95,19 +123,15 @@ def main():
                 is_weekend = today.dayofweek in (5, 6)
                 
                 if (today - latest_cached_date).days >= 1 and not is_weekend:
-                    with st.spinner("🔄 Fetching fresh incremental market data..."):
-                        try:
-                            from data.fetcher import DataFetcher
-                            fetcher = DataFetcher()
-                            fetcher.fetch_all()
-                            
-                            from data.fundamentals_seed import main as seed_main
-                            seed_main()
-                            
-                            # Rerun to pick up the updated Parquet files
+                    with _update_lock:
+                        if not _is_updating:
+                            _is_updating = True
+                            t = threading.Thread(target=run_background_update, name="CacheUpdaterThread")
+                            t.daemon = True
+                            t.start()
+                            st.toast("🔄 Fresh market data update started in the background.")
+                            # Force a rerun to render the update banner immediately
                             st.rerun()
-                        except Exception as update_err:
-                            logging.warning(f"Failed to auto-update incremental cache: {update_err}")
     except Exception as e:
         # Check if any active tickers in the universe are missing their raw cache files
         missing_cache = False
